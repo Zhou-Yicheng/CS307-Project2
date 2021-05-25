@@ -6,8 +6,8 @@ from factory import ServiceFactory, create_async_context
 
 
 async def main():
-    async with create_async_context() as context:
-        factory = ServiceFactory(context)
+    async with create_async_context() as pool:
+        factory = ServiceFactory(pool)
         if hasattr(factory, 'async_init') and callable(getattr(factory, 'async_init')):
             await factory.async_init()
 
