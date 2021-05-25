@@ -1,3 +1,4 @@
+import asyncpg
 from service.semester_service import SemesterService
 from datetime import date
 from typing import List
@@ -7,7 +8,7 @@ from dto import Semester
 
 class semester_service(SemesterService):
 
-    def __init__(self, pool):
+    def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool;
 
 

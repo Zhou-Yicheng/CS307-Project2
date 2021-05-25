@@ -1,3 +1,4 @@
+import asyncpg
 from service.instructor_service import InstructorService
 from typing import List
 
@@ -6,7 +7,7 @@ from dto import CourseSection
 
 class instructor_service(InstructorService):
 
-    def __init__(self, pool):
+    def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
 
 

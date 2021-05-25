@@ -1,3 +1,4 @@
+import asyncpg
 from service.course_service import CourseService
 from typing import List, Optional
 
@@ -7,19 +8,25 @@ from dto import (Course, CourseGrading, CourseSection, CourseSectionClass,
 
 class course_service(CourseService):
 
-    def __init__(self, pool):
+    def __init__ (self, pool: asyncpg.Pool):
         self.__pool = pool;
 
-
+    #TODO: prerequisite
     async def add_course(self, course_id: str, course_name: str, credit: int,
                          class_hour: int, grading: CourseGrading,
                          prerequisite: Optional[Prerequisite]):
-        raise NotImplementedError
+        async with self.__pool.acquire() as conn:
+            await conn.execute('''
+                insert into course (id, name, credit, class_hour, grading)
+                values (%s, %s, %d, %d, %s)
+            ''' % (course_id, course_name, credit, class_hour, grading.name))
+            #await conn.execute('''insert into prerequisite ())
 
     async def add_course_section(self, course_id: str, semester_id: int,
                                  section_name: str, total_capacity: int
                                  ) -> int:
-        raise NotImplementedError
+        async with self.__pool.acquire() as conn:
+            await conn.fetchval()
 
     async def add_course_section_class(self, section_id: int,
                                        instructor_id: int,

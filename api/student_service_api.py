@@ -1,3 +1,4 @@
+import asyncpg
 import datetime
 from service.student_service import StudentService
 from typing import List, Mapping, Optional
@@ -8,13 +9,17 @@ from dto import (Course, CourseSearchEntry, CourseTable, CourseType,
 
 class student_service(StudentService):
 
-    def __init__ (self, pool):
+    def __init__ (self, pool: asyncpg.Pool):
         self.__pool = pool;
         
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
-        raise NotImplementedError
+        async with self.__pool.acquire() as conn:
+            await conn.excute('''
+            insert into student (id, full_name, enrolled_date, major)
+            values (%d, %s, %s, %d)
+            ''' % (user_id, last_name+' '+first_name, enrolled_date, major_id))
 
     async def search_course(self, *, student_id: int, semester_id: int,
                             search_cid: Optional[str] = None,

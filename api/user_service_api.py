@@ -1,4 +1,4 @@
-
+import asyncpg
 from service.user_service import UserService
 from typing import List
 
@@ -7,7 +7,7 @@ from dto import User
 
 class user_service(UserService):
 
-    def __init__(self, pool):
+    def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool;
 
 

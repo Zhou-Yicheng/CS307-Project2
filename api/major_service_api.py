@@ -1,3 +1,4 @@
+import asyncpg
 from service.major_service import MajorService
 from typing import List
 
@@ -6,7 +7,7 @@ from dto import Major
 
 class major_service(MajorService):
     
-    def __inti__(self, pool):
+    def __inti__(self, pool: asyncpg.Pool):
         self.__pool = pool;
 
 
