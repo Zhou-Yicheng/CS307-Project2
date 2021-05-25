@@ -3,8 +3,8 @@ from pathlib import Path
 
 import asyncpg
 
-from service import *
-
+from service import CourseService, DepartmentService, InstructorService, MajorService, SemesterService, StudentService, UserService
+from api import course_service, department_service, instructor_service, major_service, semester_service, student_service, user_service
 
 def create_async_context():
     # You can customize the async context manager in this function.
@@ -29,29 +29,22 @@ class ServiceFactory:
         pass
 
     def create_course_service(self) -> CourseService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return course_service(self.__pool)
 
     def create_department_service(self) -> DepartmentService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return department_service(self.__pool)
 
     def create_instructor_service(self) -> InstructorService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return instructor_service(self.__pool)
 
     def create_major_service(self) -> MajorService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return major_service(self.__pool)
 
     def create_semester_service(self) -> SemesterService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return semester_service(self.__pool)
 
     def create_student_service(self) -> StudentService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return student_service(self.__pool)
 
     def create_user_service(self) -> UserService:
-        # TODO: return an instance of your implementation
-        raise NotImplementedError
+        return user_service(self.__pool)
