@@ -1,5 +1,5 @@
--- drop schema public CASCADE
--- create schema public;
+drop schema public CASCADE;
+create schema public;
 create table semester (
 	id			serial primary key,
 	name		varchar not null,
@@ -58,17 +58,17 @@ create table class (
 	id			serial primary key,
 	section		integer not null references section ON DELETE CASCADE,
 	instructor	integer not null references instructor,
-	day_of_week	integer not null,
+	day_of_week	varchar not null,
 	week_list	integer[] not null,
 	class_begin	integer not null,
 	class_end	integer not null,
 	location	varchar not null,
-	CHECK (day_of_week in (1, 2, 3, 4, 5, 6, 7))
+	CHECK (day_of_week in ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'))
 );
 
 create table prerequisite (
-	id			integer references course,
-	idx			serial,
+	id			varchar references course,
+	idx			integer,
 	val			varchar,
 	ptr			integer[],
 	PRIMARY KEY (id, idx)
@@ -78,10 +78,15 @@ create table takes (
 	student_id		integer references student,
 	section_id		integer references section,
 	grade			varchar(4),
+	CHECK (grade in ('PASS', 'FAIL') or cast(grade as integer) between 0 and 100),
 	PRIMARY KEY (student_id, section_id)
 );
 
 -- TODO: index
+create index on class (section);
+create index on section (course, semester);
+
+-- TODO: major_course
 
 -- create view coursetable as (
 -- 	select course.name, course.
