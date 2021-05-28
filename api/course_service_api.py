@@ -1,8 +1,8 @@
+from dto import AndPrerequisite, Course, CourseGrading, CoursePrerequisite, CourseSection, CourseSectionClass, DayOfWeek, Department, Instructor, Major, OrPrerequisite, Prerequisite, Student
 import asyncpg
 from service.course_service import CourseService
 from typing import List, Optional
 from exception import EntityNotFoundError, IntegrityViolationError
-from dto import *
 
 class course_service(CourseService):
 
@@ -166,8 +166,8 @@ class course_service(CourseService):
             res = await con.fetchrow('''
             select section.id, section.name, total_capacity, left_capacity
             from section
-                join class on section.id = class.section having class.id = class_id
-            ''')
+                join class on section.id = class.section having class.id = %d
+            ''' % class_id)
             if (res):
                 return CourseSection(res['section.id'], res['section.name'], \
                     res['total_capacity'], res['left_capacity'])
