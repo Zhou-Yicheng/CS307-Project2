@@ -1,3 +1,4 @@
+from exception import EntityNotFoundError, IntegrityViolationError
 import asyncpg
 import datetime
 from service.student_service import StudentService
@@ -12,14 +13,32 @@ class student_service(StudentService):
     def __init__ (self, pool: asyncpg.Pool):
         self.__pool = pool;
         
+    #* List all course or time conflicting courses' full name, sorted alphabetically.
+    #* Course full name: String.format("%s[%s]", course.name, section.name)
+    #*
+    #* Course conflict is when multiple sections belong to the same course.
+    #* Time conflict is when multiple sections have time-overlapping classes.
+    #* Note that a section is both course and time conflicting with itself!
+    #*
+    #* Stores all courses(encapsulated by CourseTableEntry) according to DayOfWeek.
+    #* The key should always be from MONDAY to SUNDAY, if the student has no course
+    #* for any of the days, put an empty list.
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
         async with self.__pool.acquire() as conn:
-            await conn.excute('''
-            insert into student (id, full_name, enrolled_date, major)
-            values (%d, %s, %s, %d)
-            ''' % (user_id, last_name+' '+first_name, enrolled_date, major_id))
+            if str.isalpha(first_name) and str.isalpha(last_name):
+                full_name = first_name + ' ' + last_name
+            else:
+                full_name = last_name+first_name
+            try:
+                await conn.excute('''
+                insert into student (id, full_name, enrolled_date, major)
+                values (%d, %s, %s, %d)
+                ''' % (user_id, full_name, enrolled_date, major_id))
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
+
 
     async def search_course(self, *, student_id: int, semester_id: int,
                             search_cid: Optional[str] = None,
@@ -36,34 +55,54 @@ class student_service(StudentService):
                             ) -> List[CourseSearchEntry]:
         raise NotImplementedError
 
+
+    #TODO
     async def enroll_course(self, student_id: int, section_id: int) \
             -> EnrollResult:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            pass
 
+#@throws IllegalStateException if the student already has a grade for the course section. 
     async def drop_course(self, student_id: int, section_id: int):
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            pass
+
 
     async def add_enrolled_course_with_grade(self, student_id: int,
                                              section_id: int,
                                              grade: Optional[Grade]):
         raise NotImplementedError
 
+
     async def set_enrolled_course_grade(self, student_id: int,
                                         section_id: int, grade: Grade):
         raise NotImplementedError
+
 
     async def get_enrolled_courses_and_grades(self, student_id: int,
                                               semester_id: Optional[int]) \
             -> Mapping[Course, Grade]:
         raise NotImplementedError
 
+
     async def get_course_table(self, student_id: int, date: datetime.date) \
             -> CourseTable:
         raise NotImplementedError
+
 
     async def passed_prerequisites_for_course(self, student_id: int,
                                               course_id: str) -> bool:
         raise NotImplementedError
 
+
     async def get_student_major(self, student_id: int) -> Major:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            res = await con.fetchrow('''
+            select *
+            from major
+            where id = (select major from student where id = %d)
+            ''' % student_id)
+            if (res):
+                return Major(res['id'], res['name'], res['department'])
+            else:
+                raise EntityNotFoundError
