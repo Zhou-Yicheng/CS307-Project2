@@ -1,14 +1,16 @@
-from dto import AndPrerequisite, Course, CourseGrading, CoursePrerequisite, CourseSection, CourseSectionClass, DayOfWeek, Department, Instructor, Major, OrPrerequisite, Prerequisite, Student
 import asyncpg
 from service.course_service import CourseService
 from typing import List, Optional
 from exception import EntityNotFoundError, IntegrityViolationError
+from dto import (AndPrerequisite, Course, CourseGrading, CoursePrerequisite,
+                 CourseSection, CourseSectionClass, DayOfWeek, Department,
+                 Instructor, Major, OrPrerequisite, Prerequisite, Student)
+
 
 class course_service(CourseService):
 
-    def __init__ (self, pool: asyncpg.Pool):
-        self.__pool = pool;
-
+    def __init__(self, pool: asyncpg.Pool):
+        self.__pool = pool
 
     async def add_course(self, course_id: str, course_name: str, credit: int,
                          class_hour: int, grading: CourseGrading,
@@ -18,17 +20,18 @@ class course_service(CourseService):
                 await con.execute('''
                 insert into course (id, name, credit, class_hour, grading)
                 values (%s, %s, %d, %d, %s)
-                ''' % (course_id, course_name, credit, class_hour, grading.name))
-                if (prerequisite):
+                ''' % (course_id, course_name, credit, class_hour, grading.name
+                       ))
+                if prerequisite:
                     stack = [0, prerequisite]
-                    while (stack):
+                    while stack:
                         i = stack.pop()
                         p = stack.pop()
-                        if (isinstance(p, AndPrerequisite)):
+                        if isinstance(p, AndPrerequisite):
                             v = 'AND'
-                        elif (isinstance(p, OrPrerequisite)):
+                        elif isinstance(p, OrPrerequisite):
                             v = 'OR'
-                        elif (isinstance(p, CoursePrerequisite)):
+                        elif isinstance(p, CoursePrerequisite):
                             v = p.course_id
                         else:
                             pass
@@ -48,7 +51,6 @@ class course_service(CourseService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-
     async def add_course_section(self, course_id: str, semester_id: int,
                                  section_name: str, total_capacity: int
                                  ) -> int:
@@ -58,11 +60,10 @@ class course_service(CourseService):
                 insert into section (course, semester, name, total_capacity, \
                     left_capacity)
                 values (%s, %d, %s, %d, %d) returning id
-                ''' % (course_id, semester_id, section_name, total_capacity, \
-                        total_capacity))
+                ''' % (course_id, semester_id, section_name, total_capacity,
+                       total_capacity))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
-
 
     async def add_course_section_class(self, section_id: int,
                                        instructor_id: int,
@@ -77,42 +78,35 @@ class course_service(CourseService):
                 insert into class (section, instructor, day_of_week, \
                     week_list, class_begin, class_end)
                 values (%d, %d, %d, %s, %d, %d, %s) returning id
-                ''' % (section_id, instructor_id, day_of_week, \
-                        week_list, class_begin, class_end, location))
+                ''' % (section_id, instructor_id, day_of_week,
+                       week_list, class_begin, class_end, location))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-
-
     async def remove_course(self, course_id: str):
         async with self.__pool.acquire() as con:
-            exe = await con.execute('delete from course where id='+course_id)
-            if (exe == 'DELETE 0'):
+            res = await con.execute('delete from course where id='+course_id)
+            if res == 'DELETE 0':
                 raise EntityNotFoundError
-
 
     async def remove_course_section(self, section_id: int):
         async with self.__pool.acquire() as con:
-            exe = await con.execute('delete from section where id='+section_id)
-            if (exe == 'DELETE 0'):
+            res = await con.execute('delete from section where id='+section_id)
+            if res == 'DELETE 0':
                 raise EntityNotFoundError
-
 
     async def remove_course_section_class(self, class_id: int):
         async with self.__pool.acquire() as con:
-            exe = await con.execute('delete from class where id ='+class_id)
-            if (exe == 'DELETE 0'):
+            res = await con.execute('delete from class where id ='+class_id)
+            if res == 'DELETE 0':
                 raise EntityNotFoundError
 
-
-
-    #no need to raise exception
+    # no need to raise exception
     async def get_all_courses(self) -> List[Course]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('select * from course')
-            return [Course(r['id'], r['name'], r['credit'], r['class_hour'], \
+            return [Course(r['id'], r['name'], r['credit'], r['class_hour'],
                     CourseGrading[r['grading']]) for r in res]
-
 
     async def get_course_sections_in_semester(self, course_id: str,
                                               semester_id: int
@@ -123,42 +117,39 @@ class course_service(CourseService):
             from section
             where course = %s and semester = %d
             ''' % (course_id, semester_id))
-            if (res):
-                return [CourseSection(r['id'], r['name'], r['total_capacity'], \
+            if res:
+                return [CourseSection(r['id'], r['name'], r['total_capacity'],
                         r['left_capacity']) for r in res]
             else:
                 raise EntityNotFoundError
 
-
     async def get_course_by_section(self, section_id: int) -> Course:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select course from section where id=' \
-                + section_id)
-            if (res):
-                return Course(res['id'], res['name'], res['credit'], \
-                    res['class_hour'], CourseGrading[res['grading']])
+            res = await con.fetchrow('select course from section where id='
+                                     + section_id)
+            if res:
+                return Course(res['id'], res['name'], res['credit'],
+                              res['class_hour'], CourseGrading[res['grading']])
             else:
                 raise EntityNotFoundError
-
 
     async def get_course_section_classes(self, section_id: int) \
             -> List[CourseSectionClass]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
             select *
-            from class 
+            from class
                 join instructor on class.instructor = instructor.id
             where section = %d
             ''' % section_id)
-            if (res):
-                return [CourseSectionClass(r['class.id'], \
-                    Instructor(r['instructor'], r['full_name']), \
-                    DayOfWeek[r['day_of_week']], r['week_list'], \
-                    r['class_begin'], r['class_end'], r['location']) \
-                    for r in res]
+            if res:
+                return [CourseSectionClass(r['class.id'],
+                        Instructor(r['instructor'], r['full_name']),
+                        DayOfWeek[r['day_of_week']], r['week_list'],
+                        r['class_begin'], r['class_end'], r['location'])
+                        for r in res]
             else:
                 raise EntityNotFoundError
-
 
     async def get_course_section_by_class(self, class_id: int) \
             -> CourseSection:
@@ -168,12 +159,12 @@ class course_service(CourseService):
             from section
                 join class on section.id = class.section having class.id = %d
             ''' % class_id)
-            if (res):
-                return CourseSection(res['section.id'], res['section.name'], \
-                    res['total_capacity'], res['left_capacity'])
+            if res:
+                return CourseSection(res['section.id'], res['section.name'],
+                                     res['total_capacity'], res['left_capacity'
+                                                                ])
             else:
                 raise EntityNotFoundError
-
 
     async def get_enrolled_students_in_semester(self, course_id: str,
                                                 semester_id: int
@@ -183,16 +174,16 @@ class course_service(CourseService):
             select student.id, full_name, enrolled_date, major, major.name, \
                 department, department.name
             from student
-                join takes on student.id = student_id 
-                join section on section_id = section.id having course = %d and \
+                join takes on student.id = student_id
+                join section on section_id = section.id having course = %d and
                     semester = %d
                 join major on major = major.id
                 join department on department = demartment.id
             ''' % (course_id, semester_id))
-            if (res):
-                return [Student(r['student.id'], r['full_name'], \
-                    r['enrolled_date'], Major(r['major'], r['major.name'], \
-                    Department(r['department'], r['department.name']))) \
-                    for r in res]
+            if res:
+                return [Student(r['student.id'], r['full_name'],
+                        r['enrolled_date'], Major(r['major'], r['major.name'],
+                        Department(r['department'], r['department.name'])))
+                        for r in res]
             else:
                 raise EntityNotFoundError

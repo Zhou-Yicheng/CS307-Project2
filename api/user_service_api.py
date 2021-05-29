@@ -8,8 +8,7 @@ from dto import User
 class user_service(UserService):
 
     def __init__(self, pool: asyncpg.Pool):
-        self.__pool = pool;
-
+        self.__pool = pool
 
     async def remove_user(self, user_id: int):
         raise NotImplementedError

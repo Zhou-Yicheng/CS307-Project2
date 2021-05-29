@@ -5,11 +5,11 @@ from typing import List
 
 from dto import Department
 
+
 class department_service(DepartmentService):
 
     def __init__(self, pool: asyncpg.Pool):
-        self.__pool = pool;
-
+        self.__pool = pool
 
     async def add_department(self, name: str) -> int:
         async with self.__pool.acquire() as conn:

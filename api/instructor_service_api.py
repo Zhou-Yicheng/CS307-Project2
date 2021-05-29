@@ -10,7 +10,6 @@ class instructor_service(InstructorService):
     def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
 
-
     async def add_instructor(self, user_id: int, first_name: str,
                              last_name: str):
         raise NotImplementedError

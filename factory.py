@@ -4,10 +4,13 @@ from pathlib import Path
 
 import asyncpg
 
-from service import (CourseService, DepartmentService, InstructorService, 
-                    MajorService, SemesterService, StudentService, UserService)
-from api import (course_service, department_service, instructor_service, 
-                major_service, semester_service, student_service, user_service)
+from service import (CourseService, DepartmentService, InstructorService,
+                     MajorService, SemesterService, StudentService,
+                     UserService)
+from api import (course_service, department_service, instructor_service,
+                 major_service, semester_service, student_service,
+                 user_service)
+
 
 def create_async_context():
     # You can customize the async context manager in this function.
@@ -24,9 +27,9 @@ def create_async_context():
 
 class ServiceFactory:
     def __init__(self, pool: asyncpg.Pool):
-        self.__pool = pool; 
+        self.__pool = pool 
         # You can add initialization steps here
-        
+
     async def async_init(self):
         # You can add asynchronous initialization steps here.
         await self.__pool._async__init__()

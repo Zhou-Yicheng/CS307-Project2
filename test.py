@@ -1,14 +1,13 @@
 import asyncio
-from dto import Student, Major
 import asyncpg
+
 
 async def main():
     pool = await asyncpg.create_pool(host='localhost',
-                                port='5432',
-                                database='project2',
-                                user='postgres',
-                                password='postgres')
-    
+                                     port='5432',
+                                     database='project2',
+                                     user='postgres',
+                                     password='postgres')
     for i in range(100):
         print(i, end=' ')
         print(await pool.fetchval("select cast('%d' as integer) between 0 and 100"%i))

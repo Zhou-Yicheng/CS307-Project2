@@ -9,8 +9,7 @@ from dto import Semester
 class semester_service(SemesterService):
 
     def __init__(self, pool: asyncpg.Pool):
-        self.__pool = pool;
-
+        self.__pool = pool
 
     async def add_semester(self, name: str, begin: date, end: date) -> int:
         raise NotImplementedError

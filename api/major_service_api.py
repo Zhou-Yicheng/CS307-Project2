@@ -6,10 +6,9 @@ from dto import Major
 
 
 class major_service(MajorService):
-    
-    def __inti__(self, pool: asyncpg.Pool):
-        self.__pool = pool;
 
+    def __inti__(self, pool: asyncpg.Pool):
+        self.__pool = pool
 
     async def add_major(self, name: str, department_id: int) -> int:
         raise NotImplementedError
