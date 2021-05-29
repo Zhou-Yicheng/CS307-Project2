@@ -24,7 +24,6 @@ class department_service(DepartmentService):
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
-#TODO
     async def get_all_departments(self) -> List[Department]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('select * from department')
