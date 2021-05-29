@@ -94,28 +94,11 @@ create table major_course(
 create index on class (section);
 create index on section (course, semester);
 
--- TODO: major_course
-
--- create view coursetable as (
--- 	select course.name, course.
--- );
-
--- Assume same for every week
--- create table coursetable (
--- 	semester_id		integer not null references semester,
--- 	student_id		integer not null,
--- 	day_of_week		integer not null,
--- 	class_begin		integer not null,
--- 	class_end		integer not null,
--- 	location		varchar not null,
--- 	instructor		varchar not null,
--- 	course_name		varchar not null
--- );
 
 create table major_course(
-	major_id		integer references major,
-	course_id		varchar references course,
+	major_id		integer references major ON DELETE CASCADE,
+	course_id		varchar references course ON DELETE CASCADE,
 	course_type		varchar not null,
 	CHECK(course_type in ('C', 'E')),
 	PRIMARY KEY(major_id, course_id)
-)
+);
