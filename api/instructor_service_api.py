@@ -19,16 +19,10 @@ class instructor_service(InstructorService):
         else:
             full_name = last_name+first_name
         async with self.__pool.acquire() as con:
-            count = con.fetchrow('''
-                select count(*) from student where id = %d
-            ''' % (user_id))
             try:
-                if(count >= 1):
-                    raise asyncpg.exceptions.IntegrityConstraintViolationError
-                else:
-                    return await con.fetchval('''
-                    insert into instructor (id, full_name) values (%d, %s)
-                    ''' % (user_id, full_name))
+                return await con.fetchval('''
+                insert into instructor (id, full_name) values (%d, %s)
+                ''' % (user_id, full_name))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
