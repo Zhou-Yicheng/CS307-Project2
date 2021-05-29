@@ -43,7 +43,7 @@ class major_service(MajorService):
         async with self.__pool.acquire() as con:
             try:
                 return await con.fetchval('''
-                insert into major_course (major_id, course_id, credit) values (%d, %s, %s) returning id
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
                 ''' % (major_id, course_id, 'C'))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -52,7 +52,7 @@ class major_service(MajorService):
         async with self.__pool.acquire() as con:
             try:
                 return await con.fetchval('''
-                insert into major_course (major_id, course_id, credit) values (%d, %s, %s) returning id
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
                 ''' % (major_id, course_id, 'E'))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e

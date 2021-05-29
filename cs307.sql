@@ -107,7 +107,7 @@ create index on section (course, semester);
 create table major_course(
 	major_id		integer references major,
 	course_id		varchar references course,
-	credit			varchar not null,
-	CHECK(credit in ('C', 'E')),
+	course_type		varchar not null,
+	CHECK(course_type in ('C', 'E')),
 	PRIMARY KEY(major_id, course_id)
 )
