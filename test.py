@@ -10,7 +10,7 @@ async def main():
                                      password='postgres')
     for i in range(100):
         print(i, end=' ')
-        print(await pool.fetchval("select cast('%d' as integer) between 0 and 100"%i))
+        print(await pool.fetchval("select cast('%d' as integer) between 0 and 100" % i))
 
 asyncio.get_event_loop().run_until_complete(main())
 #     async with pool.acquire() as conn:
@@ -24,4 +24,3 @@ asyncio.get_event_loop().run_until_complete(main())
 #             print("Exception")
 
 # asyncio.get_event_loop().run_until_complete(main())
-

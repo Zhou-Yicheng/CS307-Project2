@@ -27,7 +27,7 @@ def create_async_context():
 
 class ServiceFactory:
     def __init__(self, pool: asyncpg.Pool):
-        self.__pool = pool 
+        self.__pool = pool
         # You can add initialization steps here
 
     async def async_init(self):
