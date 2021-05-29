@@ -31,7 +31,7 @@ class department_service(DepartmentService):
 
     async def get_department(self, department_id: int) -> Department:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select id, name from department where id ='+department_id)
+            res = await con.fetchrow('select * from department where id ='+department_id)
             if res:
                 return Department(res['id'], res['name'])
             else:

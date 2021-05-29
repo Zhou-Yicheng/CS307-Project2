@@ -1,4 +1,3 @@
-from collections import UserDict
 from exception import IntegrityViolationError
 import asyncpg
 from service.instructor_service import InstructorService
@@ -26,7 +25,7 @@ class instructor_service(InstructorService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-
+    # TODO: optimize and index
     async def get_instructed_course_sections(self, instructor_id: int,
                                              semester_id: int
                                              ) -> List[CourseSection]:

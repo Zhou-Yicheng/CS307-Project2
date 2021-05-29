@@ -4,9 +4,9 @@ import datetime
 from service.student_service import StudentService
 from typing import List, Mapping, Optional
 
-from dto import (Course, CourseGrading, CourseSearchEntry, CourseTable,
-                 CourseType,
-                 DayOfWeek, EnrollResult, Grade, Major)
+from dto import (Course, CourseGrading, CourseSearchEntry, CourseSection,
+                 CourseTable, CourseType,
+                 DayOfWeek, EnrollResult, Grade, Major, PassOrFailGrade)
 
 
 class student_service(StudentService):
@@ -59,30 +59,88 @@ class student_service(StudentService):
                     having student_id = %d
             ''' % (semester_id, student_id))
             if res:
-                return [Course(r['course.id'], r['course.name'], r['credit'],
-                        r['class_hour'], CourseGrading[r['grading']])
-                        for r in res]
+                return [CourseSearchEntry(
+                                          Course(r['course.id'],
+                                                 r['course.name'],
+                                                 r['credit'],
+                                                 r['class_hout'],
+                                                 CourseGrading[r['grading']]
+                                                 ),
+                                          CourseSection(r['section'],
+                                                        r['section.name'],
+                                                        r['total_capacity'],
+                                                        r['left_capacity']
+                                                        ),
+                                          [],
+                                          []
+                        ) for r in res]
             else:
                 raise EntityNotFoundError
 
     async def enroll_course(self, student_id: int, section_id: int) \
             -> EnrollResult:
         async with self.__pool.acquire() as con:
-            con.close()
+            try:
+                res = await con.execute('''
+                insert into takes (student_id, section_id)
+                values (%d, %d)
+                ''' % (student_id, section_id))
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
 
-# @throws Exception if the student already has a grade for the course section.
+    # TODO: capacity
     async def drop_course(self, student_id: int, section_id: int):
         async with self.__pool.acquire() as con:
-            con.close()
+            grade = await con.fetchval('''
+            select grade
+            from takes
+            where studnet_id = %d and section_id = %d
+            ''' % (student_id, section_id))
+            if grade:
+                raise RuntimeError
+            else:
+                res = await con.execute('''
+                delete from takes
+                where student_id = %d and section_id = %d
+                ''' % (student_id, section_id))
+                if res == 'DELETE 0':
+                    raise EntityNotFoundError
 
     async def add_enrolled_course_with_grade(self, student_id: int,
                                              section_id: int,
                                              grade: Optional[Grade]):
-        raise NotImplementedError
+        if grade:
+            async with self.__pool.acquire() as con:
+                grading = await con.fetchval('''
+                select grading
+                from course
+                    join section on course.id = section.course
+                where section = %d
+                ''' % section_id)
+                # if (grading == 'PASS_OR_FAIL' and isinstance(grade, int)
+                #     or grading == 'HUNDRED_MARK_SCORE' and
+                #                   isinstance(grade, PassOrFailGrade)):
+                #     raise BaseException
+                if grading == 'PASS_OR_FAIL':
+                    if grade == PassOrFailGrade.PASS:
+                        
+                    elif grade == PassOrFailGrade.FAIL:
+                elif grading == 'HUNDRED_MARK_SCORE':
+                    pass
 
     async def set_enrolled_course_grade(self, student_id: int,
                                         section_id: int, grade: Grade):
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            if isinstance(grade, PassOrFailGrade.PASS):
+                grade = 'PASS'
+            elif isinstance(grade, PassOrFailGrade.FAIL):
+                grade = 'FAIL'
+            else:
+                await con.execute('''
+                update takes
+                set grade = '%s'
+                where student_id = %d and section_id = %d
+                ''' % (grade, student_id, section_id))
 
     async def get_enrolled_courses_and_grades(self, student_id: int,
                                               semester_id: Optional[int]) \

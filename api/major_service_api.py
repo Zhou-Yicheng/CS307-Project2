@@ -26,14 +26,16 @@ class major_service(MajorService):
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
+    # TODO
     async def get_all_majors(self) -> List[Major]:
         async with self.__pool.acquire() as con:
-            res = await con.fetch('select id, name, department from major')
+            res = await con.fetch('select * from major')
             return [Major(r['id'], r['name'], r['department']) for r in res]
 
+    # TODO
     async def get_major(self, major_id: int) -> Major:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select id, name, department from major')
+            res = await con.fetchrow('select * from major where id='+major_id)
             if res:
                 return Major(res['id'], res['name'], res['department'])
             else:
@@ -42,8 +44,8 @@ class major_service(MajorService):
     async def add_major_compulsory_course(self, major_id: int, course_id: str):
         async with self.__pool.acquire() as con:
             try:
-                return await con.fetchval('''
-                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
+                await con.execute('''
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s)
                 ''' % (major_id, course_id, 'C'))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -51,8 +53,8 @@ class major_service(MajorService):
     async def add_major_elective_course(self, major_id: int, course_id: str):
         async with self.__pool.acquire() as con:
             try:
-                return await con.fetchval('''
-                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
+                await con.execute('''
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s)
                 ''' % (major_id, course_id, 'E'))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e

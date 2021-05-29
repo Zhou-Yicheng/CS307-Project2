@@ -23,7 +23,7 @@ class semester_service(SemesterService):
 
     async def remove_semester(self, semester_id: int):
         async with self.__pool.acquire() as con:
-            res = await con.execute('delete from department where id ='+semester_id)
+            res = await con.execute('delete from semester where id ='+semester_id)
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
@@ -34,8 +34,8 @@ class semester_service(SemesterService):
 
     async def get_semester(self, semester_id: int) -> Semester:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select id, name, begin, end from department where id ='+semester_id)
+            res = await con.fetchrow('select * from semester where id ='+semester_id)
             if res:
-                return Semester(res['id'], res['name'], res['begin'], res['end'])
+                return Semester(res['id'], res['name'], res['begin_date'], res['end_date'])
             else:
                 return EntityNotFoundError
