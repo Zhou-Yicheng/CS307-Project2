@@ -1,3 +1,4 @@
+from exception import EntityNotFoundError, IntegrityViolationError
 import asyncpg
 from service.major_service import MajorService
 from typing import List
@@ -11,19 +12,47 @@ class major_service(MajorService):
         self.__pool = pool
 
     async def add_major(self, name: str, department_id: int) -> int:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            try:
+                return await con.fetchval('''
+                insert into major (name, department) values (%s, %d) returning id
+                ''' % (name, department_id))
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
 
     async def remove_major(self, major_id: int):
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            res = await con.execute('delete from major where id='+major_id)
+            if res == 'DELETE 0':
+                raise EntityNotFoundError
 
     async def get_all_majors(self) -> List[Major]:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            res = await con.fetch('select id, name, department from major')
+            return [Major(r['id'], r['name'], r['department']) for r in res]
 
     async def get_major(self, major_id: int) -> Major:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            res = await con.fetchrow('select id, name, department from major')
+            if res:
+                return Major(res['id'], res['name'], res['department'])
+            else:
+                raise EntityNotFoundError
 
     async def add_major_compulsory_course(self, major_id: int, course_id: str):
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            try:
+                return await con.fetchval('''
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
+                ''' % (major_id, course_id, 'C'))
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
 
     async def add_major_elective_course(self, major_id: int, course_id: str):
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            try:
+                return await con.fetchval('''
+                insert into major_course (major_id, course_id, course_type) values (%d, %s, %s) returning id
+                ''' % (major_id, course_id, 'E'))
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
