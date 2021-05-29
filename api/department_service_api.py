@@ -4,6 +4,7 @@ from service.department_service import DepartmentService
 from typing import List
 from dto import Department
 
+
 class department_service(DepartmentService):
 
     def __init__(self, pool: asyncpg.Pool):
@@ -13,14 +14,16 @@ class department_service(DepartmentService):
         async with self.__pool.acquire() as con:
             try:
                 return await con.fetchval('''
-                insert into department (name) values (%s) returning id
+                insert into department (name) values ('%s')
+                    returning id
                 ''' % (name))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
     async def remove_department(self, department_id: int):
         async with self.__pool.acquire() as con:
-            res = await con.execute('delete from department where id='+department_id)
+            res = await con.execute('delete from department where id='
+                                    + department_id)
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
@@ -31,7 +34,8 @@ class department_service(DepartmentService):
 
     async def get_department(self, department_id: int) -> Department:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select * from department where id ='+department_id)
+            res = await con.fetchrow('select * from department where id ='
+                                     + department_id)
             if res:
                 return Department(res['id'], res['name'])
             else:

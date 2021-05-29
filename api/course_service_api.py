@@ -19,7 +19,7 @@ class course_service(CourseService):
             try:
                 await con.execute('''
                 insert into course (id, name, credit, class_hour, grading)
-                values (%s, %s, %d, %d, %s)
+                values ('%s', '%s', %d, %d, '%s')
                 ''' % (course_id, course_name, credit, class_hour, grading.name
                        ))
                 if prerequisite:
@@ -46,7 +46,7 @@ class course_service(CourseService):
 
                         await con.execute('''
                         insert into prerequisite (id, idx, val, ptr)
-                        values (%d, %d, %s, %s)
+                        values (%d, %d, '%s', '%s')
                         ''' % (course_id, i, v, ptr))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -59,7 +59,8 @@ class course_service(CourseService):
                 return await con.fetchval('''
                 insert into section (course, semester, name, total_capacity, \
                     left_capacity)
-                values (%s, %d, %s, %d, %d) returning id
+                values ('%s', %d, '%s', %d, %d)
+                    returning id
                 ''' % (course_id, semester_id, section_name, total_capacity,
                        total_capacity))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
@@ -77,7 +78,8 @@ class course_service(CourseService):
                 return await con.fetchval('''
                 insert into class (section, instructor, day_of_week, \
                     week_list, class_begin, class_end)
-                values (%d, %d, %d, %s, %d, %d, %s) returning id
+                values (%d, %d, %d, '%s', %d, %d, '%s')
+                    returning id
                 ''' % (section_id, instructor_id, day_of_week,
                        week_list, class_begin, class_end, location))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
@@ -119,7 +121,7 @@ class course_service(CourseService):
             res = await con.fetch('''
             select *
             from section
-            where course = %s and semester = %d
+            where course = '%s' and semester = %d
             ''' % (course_id, semester_id))
             if res:
                 return [CourseSection(r['id'],
@@ -186,7 +188,6 @@ class course_service(CourseService):
             else:
                 raise EntityNotFoundError
 
-    # TODO
     async def get_enrolled_students_in_semester(self, course_id: str,
                                                 semester_id: int
                                                 ) -> List[Student]:

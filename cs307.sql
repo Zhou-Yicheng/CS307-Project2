@@ -93,12 +93,3 @@ create table major_course(
 -- TODO: index
 create index on class (section);
 create index on section (course, semester);
-
-
-create table major_course(
-	major_id		integer references major ON DELETE CASCADE,
-	course_id		varchar references course ON DELETE CASCADE,
-	course_type		varchar not null,
-	CHECK(course_type in ('C', 'E')),
-	PRIMARY KEY(major_id, course_id)
-);

@@ -20,7 +20,7 @@ class instructor_service(InstructorService):
         async with self.__pool.acquire() as con:
             try:
                 return await con.fetchval('''
-                insert into instructor (id, full_name) values (%d, %s)
+                insert into instructor (id, full_name) values (%d, '%s')
                 ''' % (user_id, full_name))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -31,10 +31,10 @@ class instructor_service(InstructorService):
                                              ) -> List[CourseSection]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
-            select section.id, section.name, section.total_capacity, section.left_capacity
+            select section.id, section.name, total_capacity, left_capacity
             from instructor join class on instructor.id = class.instructor
                 join section on class.section = section.id
             where instructor.id = %d and semester = %d
             ''' % (instructor_id, semester_id))
             return [CourseSection(r['id'], r['name'],
-            r['total_capacity'], r['left_capacity']) for r in res]
+                    r['total_capacity'], r['left_capacity']) for r in res]
