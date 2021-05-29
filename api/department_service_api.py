@@ -2,9 +2,7 @@ import asyncpg
 from exception import EntityNotFoundError, IntegrityViolationError
 from service.department_service import DepartmentService
 from typing import List
-
 from dto import Department
-
 
 class department_service(DepartmentService):
 
@@ -36,6 +34,6 @@ class department_service(DepartmentService):
         async with self.__pool.acquire() as con:
             res = await con.fetchrow('select id, name from department where id ='+department_id)
             if res:
-                return Department[res['id'], res['name']]
+                return Department(res['id'], res['name'])
             else:
                 return EntityNotFoundError
