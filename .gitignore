@@ -27,3 +27,6 @@ venv.bak/
 
 # Archive for submission
 src.tar.gz
+
+# test file
+test.py
