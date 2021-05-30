@@ -33,7 +33,7 @@ class department_service(DepartmentService):
             if res:
                 return [Department(r['id'], r['name']) for r in res]
             else:
-                raise EntityNotFoundError
+                return []
 
     async def get_department(self, department_id: int) -> Department:
         async with self.__pool.acquire() as con:

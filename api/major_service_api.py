@@ -40,7 +40,7 @@ class major_service(MajorService):
                                          r['department.name']))
                         for r in res]
             else:
-                raise EntityNotFoundError
+                return []
 
     async def get_major(self, major_id: int) -> Major:
         async with self.__pool.acquire() as con:

@@ -41,7 +41,7 @@ class semester_service(SemesterService):
                                 r['end_date']
                                 ) for r in res]
             else:
-                raise EntityNotFoundError
+                return []
 
     async def get_semester(self, semester_id: int) -> Semester:
         async with self.__pool.acquire() as con:

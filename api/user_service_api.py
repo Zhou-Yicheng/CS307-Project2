@@ -30,7 +30,7 @@ class user_service(UserService):
             elif(students):
                 return [Student(s['id'], s['full_name']) for s in students]
             else:
-                raise EntityNotFoundError
+                return []
 
     async def get_user(self, user_id: int) -> User:
         async with self.__pool.acquire() as con:
