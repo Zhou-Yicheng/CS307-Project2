@@ -23,8 +23,15 @@ class user_service(UserService):
         async with self.__pool.acquire() as con:
             instructors = await con.fetch('select * from instructor')
             students = await con.fetch('select * from student')
-            return ([Instructor(i['id'], i['full_name']) for i in instructors]
-                    + [Student(s['id'], s['full_name']) for s in students])
+            if(instructors and students):
+                return ([Instructor(i['id'], i['full_name']) for i in instructors]
+                        + [Student(s['id'], s['full_name']) for s in students])
+            elif(instructors):
+                return [Instructor(i['id'], i['full_name']) for i in instructors]
+            elif(students):
+                return [Student(s['id'], s['full_name']) for s in students]
+            else:
+                raise EntityNotFoundError
 
     async def get_user(self, user_id: int) -> User:
         async with self.__pool.acquire() as con:
