@@ -5,7 +5,8 @@ create table semester (
 	name		varchar not null,
 	begin_date	date not null,
 	end_date	date not null,
-	UNIQUE (name, begin_date, end_date)
+	CHECK (begin_date < end_date),
+	UNIQUE (name, begin_date)
 );
 
 create table department (
@@ -63,6 +64,7 @@ create table class (
 	class_begin	integer not null,
 	class_end	integer not null,
 	location	varchar not null,
+	CHECK (class_begin < class_end),
 	CHECK (day_of_week in ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'))
 );
 
@@ -94,18 +96,18 @@ create table major_course(
 create index on class (section);
 create index on section (course, semester);
 
-create view coursetable as(
-	select day_of_week,
-		   course.name||'['||section.name||']' as class_name,
-		   instructor.id,
-		   instructor.name,
-		   class_begin,
-		   class_end,
-		   location
-	from class
-		join section on section = section.id
-		join course on course = course.id
-)
+-- create view coursetable as(
+-- 	select day_of_week,
+-- 		   course.name||'['||section.name||']' as class_name,
+-- 		   instructor.id,
+-- 		   instructor.name,
+-- 		   class_begin,
+-- 		   class_end,
+-- 		   location
+-- 	from class
+-- 		join section on section = section.id
+-- 		join course on course = course.id
+-- );
 
 create or replace function day_in_semester_week(IN day date, OUT semester_id integer, OUT week integer)
 as $$

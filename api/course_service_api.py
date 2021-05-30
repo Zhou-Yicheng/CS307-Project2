@@ -46,7 +46,7 @@ class course_service(CourseService):
 
                         await con.execute('''
                         insert into prerequisite (id, idx, val, ptr)
-                        values (%d, %d, '%s', '%s')
+                        values (%d, %d, '%s', array%s)
                         ''' % (course_id, i, v, ptr))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -78,9 +78,9 @@ class course_service(CourseService):
                 return await con.fetchval('''
                 insert into class (section, instructor, day_of_week, \
                     week_list, class_begin, class_end)
-                values (%d, %d, %d, '%s', %d, %d, '%s')
+                values (%d, %d, '%s', array%s, %d, %d, '%s')
                     returning id
-                ''' % (section_id, instructor_id, day_of_week,
+                ''' % (section_id, instructor_id, day_of_week.name,
                        week_list, class_begin, class_end, location))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -99,20 +99,22 @@ class course_service(CourseService):
 
     async def remove_course_section_class(self, class_id: int):
         async with self.__pool.acquire() as con:
-            res = await con.execute('delete from class where id ='+class_id)
+            res = await con.execute('delete from class where id='+class_id)
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
-    # no need to raise exception
     async def get_all_courses(self) -> List[Course]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('select * from course')
-            return [Course(r['id'],
-                           r['name'],
-                           r['credit'],
-                           r['class_hour'],
-                           CourseGrading[r['grading']]
-                           ) for r in res]
+            if res:
+                return [Course(r['id'],
+                               r['name'],
+                               r['credit'],
+                               r['class_hour'],
+                               CourseGrading[r['grading']]
+                               ) for r in res]
+            else:
+                return []
 
     async def get_course_sections_in_semester(self, course_id: str,
                                               semester_id: int
@@ -196,11 +198,11 @@ class course_service(CourseService):
             select student.id, full_name, enrolled_date, major, major.name, \
                    department, department.name
             from student
+                join major on major = major.id
+                join department on department = department.id
                 join takes on student.id = student_id
                 join section on section_id = section.id
                     having course = %d and semester = %d
-                join major on major = major.id
-                join department on department = demartment.id
             ''' % (course_id, semester_id))
             if res:
                 return [Student(r['student.id'],
@@ -214,3 +216,33 @@ class course_service(CourseService):
                                 ) for r in res]
             else:
                 raise EntityNotFoundError
+
+        # async with self.__pool.acquire() as con:
+        #     res = await con.fetch('''
+        #     select * from
+        #     select *
+        #     from student
+        #     where id in (
+        #         select student_id
+        #         from takes
+        #         where section_id in (
+        #             select section.id
+        #             from section
+        #             where course = %d and semester = %d
+        #         )
+        #     ) s
+        #     join major on s.major = major.id
+        #     join department on s.department = department.id
+        #     ''' % (course_id, semester_id))
+        #     if res:
+        #         return [Student(r['student.id'],
+        #                         r['full_name'],
+        #                         r['enrolled_date'],
+        #                         Major(r['major'],
+        #                               r['major.name'],
+        #                               Department(r['department'],
+        #                                          r['department.name'])
+        #                               )
+        #                         ) for r in res]
+        #     else:
+        #         raise EntityNotFoundError
