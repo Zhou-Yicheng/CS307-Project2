@@ -41,4 +41,4 @@ class user_service(UserService):
             elif i:
                 return Instructor(i['id'], i['full_name'])
             else:
-                return EntityNotFoundError
+                raise EntityNotFoundError

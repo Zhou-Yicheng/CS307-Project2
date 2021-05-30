@@ -42,4 +42,4 @@ class department_service(DepartmentService):
             if res:
                 return Department(res['id'], res['name'])
             else:
-                return EntityNotFoundError
+                raise EntityNotFoundError

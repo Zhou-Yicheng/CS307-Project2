@@ -55,4 +55,4 @@ class semester_service(SemesterService):
                                 res['end_date']
                                 )
             else:
-                return EntityNotFoundError
+                raise EntityNotFoundError
