@@ -25,7 +25,6 @@ class instructor_service(InstructorService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    # TODO: index
     async def get_instructed_course_sections(self, instructor_id: int,
                                              semester_id: int
                                              ) -> List[CourseSection]:

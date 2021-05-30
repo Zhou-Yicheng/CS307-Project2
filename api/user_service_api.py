@@ -18,7 +18,6 @@ class user_service(UserService):
             if res1 == 'DELETE 0' and res2 == 'DELETE 0':
                 raise EntityNotFoundError
 
-    # TODO
     async def get_all_users(self) -> List[User]:
         async with self.__pool.acquire() as con:
             instructors = await con.fetch('select * from instructor')

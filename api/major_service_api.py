@@ -27,13 +27,12 @@ class major_service(MajorService):
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
-
     async def get_all_majors(self) -> List[Major]:
         async with self.__pool.acquire() as con:
-            res = await con.fetch('''select * from 
-                                    major join department
-                                    on major.department = department.id            
-                      ''')
+            res = await con.fetch('''
+            select * from
+            major join department on major.department = department.id
+            ''')
             if res:
                 return [Major(r['major.id'],
                               r['major.name'],
@@ -45,10 +44,10 @@ class major_service(MajorService):
 
     async def get_major(self, major_id: int) -> Major:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('''select * from 
+            res = await con.fetchrow('''select * from
                                     major join department
                                     on major.department = department.id
-                                    where major.id =        
+                                    where major.id =
                       ''' + major_id)
             if res:
                 return Major(res['major.id'],
