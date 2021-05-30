@@ -107,9 +107,22 @@ create view coursetable as(
 		join course on course = course.id
 )
 
-create function get_week(IN day date, OUT semester integer, OUT week integer)
+create or replace function day_in_semester_week(IN day date, OUT semester_id integer, OUT week integer)
 as $$
 begin
-	
+
+	select id into semester_id
+	from semester
+	where day between begin_date and end_date;
+
+	if(semester_id is null) then
+        return;
+    end if;
+
+	select (day - begin_date)/7 + 1 into week
+    from semester
+    where id = semester_id;
+
+    return;
 end
 $$ language plpgsql
