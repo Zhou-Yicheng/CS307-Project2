@@ -30,7 +30,10 @@ class department_service(DepartmentService):
     async def get_all_departments(self) -> List[Department]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('select * from department')
-            return [Department(r['id'], r['name']) for r in res]
+            if res:
+                return [Department(r['id'], r['name']) for r in res]
+            else:
+                raise EntityNotFoundError
 
     async def get_department(self, department_id: int) -> Department:
         async with self.__pool.acquire() as con:
