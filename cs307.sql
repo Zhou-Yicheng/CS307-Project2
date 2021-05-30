@@ -93,3 +93,23 @@ create table major_course(
 -- TODO: index
 create index on class (section);
 create index on section (course, semester);
+
+create view coursetable as(
+	select day_of_week,
+		   course.name||'['||section.name||']' as class_name,
+		   instructor.id,
+		   instructor.name,
+		   class_begin,
+		   class_end,
+		   location
+	from class
+		join section on section = section.id
+		join course on course = course.id
+)
+
+create function get_week(IN day date, OUT semester integer, OUT week integer)
+as $$
+begin
+	
+end
+$$ language plpgsql
