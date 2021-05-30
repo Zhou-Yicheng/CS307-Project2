@@ -3,7 +3,7 @@ import asyncpg
 from service.major_service import MajorService
 from typing import List
 
-from dto import Major
+from dto import Major, Department
 
 
 class major_service(MajorService):
@@ -27,18 +27,34 @@ class major_service(MajorService):
             if res == 'DELETE 0':
                 raise EntityNotFoundError
 
-    # TODO
+
     async def get_all_majors(self) -> List[Major]:
         async with self.__pool.acquire() as con:
-            res = await con.fetch('select * from major')
-            return [Major(r['id'], r['name'], r['department']) for r in res]
+            res = await con.fetch('''select * from 
+                                    major join department
+                                    on major.department = department.id            
+                      ''')
+            if res:
+                return [Major(r['major.id'],
+                              r['major.name'],
+                              Department(r['department.id'],
+                                         r['department.name']))
+                        for r in res]
+            else:
+                raise EntityNotFoundError
 
-    # TODO
     async def get_major(self, major_id: int) -> Major:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('select * from major where id='+major_id)
+            res = await con.fetchrow('''select * from 
+                                    major join department
+                                    on major.department = department.id
+                                    where major.id =        
+                      ''' + major_id)
             if res:
-                return Major(res['id'], res['name'], res['department'])
+                return Major(res['major.id'],
+                             res['major.name'],
+                             Department(res['department.id'],
+                                        res['department.name']))
             else:
                 raise EntityNotFoundError
 
