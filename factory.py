@@ -32,7 +32,19 @@ class ServiceFactory:
 
     async def async_init(self):
         # You can add asynchronous initialization steps here.
-        return await self.__pool._async__init__()
+        # return await self.__pool._async__init__()
+        if self.__pool._initialized:
+            return
+        if self.__pool._initializing:
+            raise asyncpg.exceptions.InterfaceError
+        if self.__pool._closed:
+            raise asyncpg.exceptions.InterfaceError
+        self.__pool._initializing = True
+        try:
+            self.__pool._initialize()
+        finally:
+            self.__pool._initializing = False
+            self.__pool._initialized = True
 
     def create_course_service(self) -> CourseService:
         return course_service(self.__pool)

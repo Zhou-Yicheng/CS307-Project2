@@ -1,13 +1,13 @@
-from exception import EntityNotFoundError, IntegrityViolationError
-import asyncpg
 import datetime
-from service.student_service import StudentService
 from typing import List, Mapping, Optional
 
+import asyncpg
 from dto import (Course, CourseGrading, CourseSearchEntry, CourseSection,
                  CourseSectionClass, CourseTable, CourseTableEntry, CourseType,
                  DayOfWeek, Department, EnrollResult, Grade, Instructor, Major,
-                 PassOrFailGrade)
+                 PassOrFailGrade, Prerequisite)
+from exception import EntityNotFoundError, IntegrityViolationError
+from service.student_service import StudentService
 
 
 class student_service(StudentService):
@@ -47,13 +47,17 @@ class student_service(StudentService):
                             page_size: int, page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
-            res = await con.fetch('''
-            select *
+            # res = await con.fetch('''
+            sql = '''
+            select select course.*, section.*, array_agg(class.*) as cls
             from course
-                join section on course.id = section.course
-                    having semester = %d
-                order by course.id, course.name, section.name
-            ''' % (semester_id))
+                join section on course.id = section.course and semester = %d
+                join class on section.id = class.secion
+                join instructor on instructor = instructor.id
+            group by course.*, section.*
+            order by course.id, course.name, section.name
+            ''' % (semester_id)
+            res = await con.fetch(sql)
             if res:
                 ans = []
                 for r in res:
@@ -66,22 +70,18 @@ class student_service(StudentService):
                                         r['section.name'],
                                         r['total_capacity'],
                                         r['left_capacity'])
-                    cls = await con.fetch('''
-                    select *
-                    from class
-                        join instructor on instructor = instructor.id
-                    where section = %d
-                    ''' % (r['section.id']))
-                    cls = [CourseSectionClass(c['class.id'],
-                                              Instructor(c['instructor'],
-                                                         c['full_name']),
-                                              DayOfWeek[c['day_of_week']],
-                                              c['week_list'],
-                                              c['class_begin'],
-                                              c['class_end'],
-                                              c['location'])
-                           for c in cls]
-                    ans.append(CourseSearchEntry(cos, sec, cls, []))
+                    cls = [CourseSectionClass(
+                        c['class.id'],
+                        Instructor(c['instructor'],
+                                   c['full_name']),
+                        DayOfWeek[c['day_of_week']],
+                        c['week_list'],
+                        c['class_begin'],
+                        c['class_end'],
+                        c['location']
+                    ) for c in r['cls']]
+                    conflict = []
+                    ans.append(CourseSearchEntry(cos, sec, cls, conflict))
                 return ans
             else:
                 raise EntityNotFoundError
@@ -97,7 +97,7 @@ class student_service(StudentService):
                     return EnrollResult.COURSE_NOT_FOUND
 
                 enroll = await con.fetchrow('''
-                select *
+                select null
                 from takes
                 where student_id = %d and section_id = %d
                 ''' % (student_id, section_id))
@@ -125,10 +125,8 @@ class student_service(StudentService):
                 time = await con.fetch('''
                 select day_of_week, class_begin, class_end
                 from class
-                    join section on class.section = section.id
-                        having semester = %d
-                    join takes on section.id = section_id
-                        having student_id = %d
+                    join section on section = section.id and semester = %d
+                    join takes on section = section_id and student_id = %d
                 ''' % (sec['semester'], student_id))
                 this = await con.fetch('''
                 select day_of_week, class_begin, class_end
@@ -145,7 +143,7 @@ class student_service(StudentService):
                                 else:
                                     return EnrollResult.COURSE_CONFLICT_FOUND
 
-                res = await con.fetch('''
+                res = await con.fetchrow('''
                 select null
                 from section
                 where course = '%s'
@@ -199,8 +197,8 @@ class student_service(StudentService):
                                              section_id: int,
                                              grade: Optional[Grade]):
         async with self.__pool.acquire() as con:
-            if grade:
-                try:
+            try:
+                if grade:
                     grading = await con.fetchval('''
                     select grading
                     from course
@@ -219,20 +217,15 @@ class student_service(StudentService):
                         ''' (student_id, section_id, grade))
                     else:
                         raise IntegrityViolationError
-                except asyncpg.exceptions.IntegrityConstraintViolationError \
-                        as e:
-                    raise IntegrityViolationError from e
-            else:
-                try:
+                else:
                     await con.execute('''
                     insert into takes (student_id, section_id)
                     values (%d, %d)
                     ''' % (student_id, section_id))
-                except asyncpg.exceptions.IntegrityConstraintViolationError \
-                        as e:
-                    raise IntegrityViolationError from e
+            except asyncpg.exceptions.IntegrityConstraintViolationError as e:
+                raise IntegrityViolationError from e
 
-    # raise exception maybe like above
+    # TODO: raise exception maybe like above
     async def set_enrolled_course_grade(self, student_id: int,
                                         section_id: int, grade: Grade):
         async with self.__pool.acquire() as con:
@@ -240,11 +233,13 @@ class student_service(StudentService):
                 grade = 'PASS'
             if grade == PassOrFailGrade.FAIL:
                 grade = 'FAIL'
-            await con.execute('''
+            res = await con.execute('''
             update takes
             set grade = '%s'
             where student_id = %d and section_id = %d
             ''' % (grade, student_id, section_id))
+            if res == 'UPDATE 0':
+                raise EntityNotFoundError
 
     async def get_enrolled_courses_and_grades(self, student_id: int,
                                               semester_id: Optional[int]) \
@@ -252,13 +247,10 @@ class student_service(StudentService):
         async with self.__pool.acquire() as con:
             if semester_id:
                 res = await con.fetch('''
-                select course.id, course.name, credit, class_hour, grading, \
-                       grade
+                select course.*, grade
                 from course
-                    join section on course.id = section.course
-                        having semester = %d
-                    join takes on section.id = section_id
-                        having student_id = %d
+                    join section on course.id = section.course and semester =%d
+                    join takes on section.id = section_id and student_id = %d
                     join semester on section.semester = semester.id
                 order by begin_date
                 ''' % (semester_id, student_id))
@@ -301,10 +293,8 @@ class student_service(StudentService):
                    class_end,
                    location
             from class
-                join section on class.section = section.id
-                    having semester = %d
-                join takes on section.id = section_id
-                    having student_id = %d
+                join section on section = section.id and semester = %d
+                join takes on section = section_id and student_id = %d
                 join course on section.course = course.id
             where %d = ANY(week_list)
             ''' % (semester, student_id, week))
@@ -323,7 +313,17 @@ class student_service(StudentService):
     # TODO: prerequisite
     async def passed_prerequisites_for_course(self, student_id: int,
                                               course_id: str) -> bool:
-        raise NotImplementedError
+        async with self.__pool.acquire() as con:
+            res = await con.fetch('''
+            select *
+            from prerequisite
+            where id = '%s'
+            order by idx
+            ''' (course_id))
+            if res:
+                return True
+            else:
+                return False
 
     async def get_student_major(self, student_id: int) -> Major:
         async with self.__pool.acquire() as con:

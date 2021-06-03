@@ -3,7 +3,7 @@
 from pathlib import Path
 import tarfile
 
-ignored_files = ['src.tar.gz', '.DS_Store', 'Desktop.ini', 'desktop.ini', '.directory']
+ignored_files = ['src.tar.gz', '.DS_Store', 'Desktop.ini', 'desktop.ini', '.directory', 'test.py', 'cs307.sql']
 ignored_types = ['.pyc', '.pyo', '.pyd']
 ignored_dirs = ['.git', '__pycache__', '.venv', 'venv', 'env', 'ENV', '.idea', '.vscode']
 

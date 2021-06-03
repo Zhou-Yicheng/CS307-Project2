@@ -1,10 +1,11 @@
-import asyncpg
-from service.course_service import CourseService
 from typing import List, Optional
-from exception import EntityNotFoundError, IntegrityViolationError
+
+import asyncpg
 from dto import (AndPrerequisite, Course, CourseGrading, CoursePrerequisite,
                  CourseSection, CourseSectionClass, DayOfWeek, Department,
                  Instructor, Major, OrPrerequisite, Prerequisite, Student)
+from exception import EntityNotFoundError, IntegrityViolationError
+from service.course_service import CourseService
 
 
 class course_service(CourseService):
@@ -195,22 +196,21 @@ class course_service(CourseService):
                                                 ) -> List[Student]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
-            select student.id, full_name, enrolled_date, major, major.name, \
-                   department, department.name
+            select student.*, major.*, department.*
             from student
-                join major on major = major.id
-                join department on department = department.id
                 join takes on student.id = student_id
                 join section on section_id = section.id
-                    having course = %d and semester = %d
+                join major on major = major.id
+                join department on department = department.id
+            where course = %d and semester = %d
             ''' % (course_id, semester_id))
             if res:
                 return [Student(r['student.id'],
                                 r['full_name'],
                                 r['enrolled_date'],
-                                Major(r['major'],
+                                Major(r['major.id'],
                                       r['major.name'],
-                                      Department(r['department'],
+                                      Department(r['department.id'],
                                                  r['department.name'])
                                       )
                                 ) for r in res]
