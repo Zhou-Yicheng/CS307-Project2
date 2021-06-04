@@ -88,39 +88,41 @@ async def test_add_course():
 
 
 async def test_add_semester():
-    for s in ss:
+    async def one_iter(s):
         b = datetime.fromtimestamp(float(s['begin']) / 1000).date()
         e = datetime.fromtimestamp(float(s['end']) / 1000).date()
         sid[s['id']] = await rss.add_semester(s['name'], b, e)
 
+    await asyncio.gather(*[one_iter(s) for s in ss])
+
 
 async def test_add_department():
-    for d in ds:
+    async def one_iter(d):
         did[d['id']] = await rds.add_department(d['name'])
+
+    await asyncio.gather(*[one_iter(d) for d in ds])
 
 
 async def test_add_major():
-    for m in ms:
+    async def one_iter(m):
         mid[m['id']] = await rms.add_major(m['name'], did[m['department']['id']])
+
+    await asyncio.gather(*[one_iter(m) for m in ms])
 
 
 async def test_add_major_course():
-    for k, cc in mcc.items():
-        for c in cc[1]:
-            await rms.add_major_compulsory_course(mid[int(k)], c)
-    for k, ec in mec.items():
-        for c in ec[1]:
-            await rms.add_major_elective_course(mid[int(k)], c)
+    await asyncio.gather(*[(rms.add_major_compulsory_course(mid[int(k)], c) for c in cc[1]) for k, cc in mcc.items()])
+    await asyncio.gather(*[(rms.add_major_elective_course(mid[int(k)], c) for c in ec[1]) for k, ec in mec.items()])
 
 
 async def test_add_user():
-    for u in us:
-        if 'cn.edu.sustech.cs307.dto.Instructor' == u['@type']:
+    async def one_iter(u):
+        if 'Instructor' in u['@type']:
             await ris.add_instructor(u['id'], u['fullName'].split(',')[0], u['fullName'].split(',')[1])
         else:
             await rsts.add_student(u['id'], mid[u['major']['id']], u['fullName'].split(',')[0],
                                    u['fullName'].split(',')[1], datetime.fromtimestamp(u['enrolledDate'] / 1000).date())
-
+    await asyncio.gather(*[one_iter(u) for u in us])
 
 async def test_select_course():
     failed_cnt = 0
@@ -142,6 +144,7 @@ async def test_select_course():
                     try:
                         await rsts.drop_course(int(k), sec_id[int(si)])
                         failed_cnt += 1
+                        # print('\n' + k + ' ' + str(sec_id[int(si)]))
                     except:
                         pass
     print(f"There are {failed_cnt} failed to throw exception")
@@ -193,7 +196,7 @@ async def test_enroll_course(path):
                 await rsts.drop_course(s, cl)
             except:
                 print(f"DROP FAILED {s}, {cl}")
-# 
+
 
 async def json_query_reader(f):
     query = json.load(f)
@@ -262,23 +265,18 @@ async def main():
         rus = factory.create_user_service()
 
         start = time()
-        print('Adding departments')
+        print('Add departments')
         await test_add_department()
-        print(time() - start)
-        print('Adding majors')
+        print('Add majors')
         await test_add_major()
-        print(time() - start)
-        print('Adding users')
+        print('Add users')
         await test_add_user()
-        print(time() - start)
-        print('Adding semesters')
+        print('Add semesters')
         await test_add_semester()
-        print(time() - start)
-        print('Adding courses')
+        print('Add courses')
         await test_add_course()
-        print(time() - start)
-        print('Adding major courses')
-        await test_add_major_course()
+        # print('Add major courses')
+        # await test_add_major_course()
         print(f'Add time usage: {time() - start}s')
         print('Test search course 1')
         start = time()

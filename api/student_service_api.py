@@ -5,7 +5,7 @@ import asyncpg
 from dto import (Course, CourseGrading, CourseSearchEntry, CourseSection,
                  CourseSectionClass, CourseTable, CourseTableEntry, CourseType,
                  DayOfWeek, Department, EnrollResult, Grade, Instructor, Major,
-                 PassOrFailGrade, Prerequisite)
+                 PassOrFailGrade, )
 from exception import EntityNotFoundError, IntegrityViolationError
 from service.student_service import StudentService
 
@@ -17,23 +17,19 @@ class student_service(StudentService):
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
-        # if (all(c.isalpha() or c.isspace() for c in first_name) and
-        #         all(c.isalpha() or c.isspace() for c in last_name)):
-        #     full_name = first_name + ' ' + last_name
-        # else:
-        #     full_name = last_name+first_name
+        if str.isascii(first_name) and str.isascii(last_name):
+            full_name = first_name + ' ' + last_name
+        else:
+            full_name = last_name+first_name
         async with self.__pool.acquire() as con:
             try:
                 await con.execute('''
                 insert into student (id, full_name, enrolled_date, major)
                 values (%d, '%s', '%s', %d)
-                ''' % (user_id, last_name, enrolled_date, major_id))
+                ''' % (user_id, full_name, enrolled_date, major_id))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    # * Course conflict is when multiple sections belong to the same course.
-    # * Time conflict is when multiple sections have time-overlapping classes.
-    # TODO: search course with arguments
     async def search_course(self, *, student_id: int, semester_id: int,
                             search_cid: Optional[str] = None,
                             search_name: Optional[str] = None,
@@ -48,45 +44,45 @@ class student_service(StudentService):
                             page_size: int, page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
-            # res = await con.fetch('''
             sql = '''
-            select course, course.name as course_name, credit, class_hour,
-                grading, section, section.name as section_name, total_capacity,
-                left_capacity
+            select course.id as course_id, course.name as course_name, credit,
+                class_hour, grading, section.id as section_id, section.name as
+                section_name, total_capacity, left_capacity, array_agg(class)
             from course
                 join section on course.id = section.course and semester = %d
-            order by course.id, course.name, section.name
+                join class on section.id = class.section
+            group by (course_id, course_name, credit, class_hour, grading,
+                section_id, section_name, total_capacity, left_capacity)
+            order by course_id, course_name, section_name
             ''' % semester_id
+            
             res = await con.fetch(sql)
             if res:
                 ans = []
                 for r in res:
-                    cos = Course(r['course'],
+                    cos = Course(r['course_id'],
                                  r['course_name'],
                                  r['credit'],
                                  r['class_hour'],
                                  CourseGrading[r['grading']])
-                    sec = CourseSection(r['section'],
+                    sec = CourseSection(r['section_id'],
                                         r['section_name'],
                                         r['total_capacity'],
                                         r['left_capacity'])
-                    # cls = [CourseSectionClass(
-                    #     c['id'],
-                    #     Instructor(c['instructor'],
-                    #                c['full_name']),
-                    #     DayOfWeek[c['day_of_week']],
-                    #     c['week_list'],
-                    #     c['class_begin'],
-                    #     c['class_end'],
-                    #     c['location']
-                    # ) for c in r['cls']]
-                    cls = []
+                    cls = [CourseSectionClass(c['id'],
+                                              Instructor(c['instructor'],
+                                                         await con.fetchval('select full_name from instructor where id=%d'%c['instructor'])),
+                                              DayOfWeek[c['day_of_week']],
+                                              c['week_list'],
+                                              c['class_begin'],
+                                              c['class_end'],
+                                              c['location']
+                                              ) for c in r['array_agg']]
                     conflict = []
                     ans.append(CourseSearchEntry(cos, sec, cls, conflict))
                 return ans
             else:
                 return []
-                # raise EntityNotFoundError
 
     async def enroll_course(self, student_id: int, section_id: int) \
             -> EnrollResult:
@@ -122,7 +118,10 @@ class student_service(StudentService):
                          or grade[-1][0] >= 60)):
                     return EnrollResult.ALREADY_PASSED
 
-                # TODO: prerequisite
+                pas = await self.passed_prerequisites_for_course(student_id,
+                                                                 sec['course'])
+                if not pas:
+                    return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
                 time = await con.fetch('''
                 select day_of_week, class_begin, class_end
@@ -206,8 +205,6 @@ class student_service(StudentService):
                     from course
                     where id = (select course from section where section.id=%d)
                     ''' % section_id)
-                    if grading is None:
-                        raise EntityNotFoundError
                     if (grading == 'PASS_OR_FAIL' and type(grade) == int or
                             grading == 'HUNDRED_MARK_SCORE' and
                             isinstance(grade, PassOrFailGrade)):
@@ -278,11 +275,9 @@ class student_service(StudentService):
     async def get_course_table(self, student_id: int, date: datetime.date) \
             -> CourseTable:
         async with self.__pool.acquire() as con:
-            day = await con.fetchval('''
+            semester, week = await con.fetchval('''
             select day_in_semester_week('%s')
             ''' % date)
-            semester = day[0]
-            week = day[1]
             if semester is None or week is None:
                 raise EntityNotFoundError
 
@@ -313,7 +308,6 @@ class student_service(StudentService):
                 table[day].append(entry)
             return table
 
-    # TODO: prerequisite
     async def passed_prerequisites_for_course(self, student_id: int,
                                               course_id: str) -> bool:
         async with self.__pool.acquire() as con:
@@ -322,8 +316,38 @@ class student_service(StudentService):
             from prerequisite
             where id = '%s'
             order by idx
-            ''' % (course_id))
-            return True
+            ''' % course_id)
+            if not res:
+                return True
+            take = await con.fetch('''
+            select course
+            from takes
+                join section on section_id = section.id
+            where student_id = %d
+            ''' % student_id)
+            take = list(take)
+
+            stack = [0]
+            val = [0 for i in range(len(res))]
+            visited = [False for i in range(len(res))]
+            while stack:
+                i = stack[-1]
+                if visited[i]:
+                    if res[i]['val'] == 'AND':
+                        val[i] = all([val[c] for c in res[i]['ptr']])
+                        stack.pop()
+                    elif res[i]['val'] == 'OR':
+                        val[i] = any([val[c] for c in res[i]['ptr']])
+                        stack.pop()
+                else:
+                    visited[i] = True
+                    if res[i]['ptr']:
+                        for j in res[i]['ptr']:
+                            stack.append(j)
+                    else:
+                        val[i] = (res[i]['val'] in take)
+                        stack.pop()
+            return val[0]
 
     async def get_student_major(self, student_id: int) -> Major:
         async with self.__pool.acquire() as con:
@@ -334,7 +358,7 @@ class student_service(StudentService):
                 join department on department = department.id
             where major.id = (select major from student where student.id = %d)
             ''' % student_id)
-            if (res):
+            if res:
                 return Major(res['id'],
                              res['major_name'],
                              Department(res['department'],

@@ -23,31 +23,30 @@ class course_service(CourseService):
                 values ('%s', '%s', %d, %d, '%s')
                 ''' % (course_id, course_name, credit, class_hour, grading.name
                        ))
-                # if prerequisite:
-                #     stack = [0, prerequisite]
-                #     while stack:
-                #         i = stack.pop()
-                #         p = stack.pop()
-                #         if isinstance(p, AndPrerequisite):
-                #             v = 'AND'
-                #         elif isinstance(p, OrPrerequisite):
-                #             v = 'OR'
-                #         elif isinstance(p, CoursePrerequisite):
-                #             v = p.course_id
-
-                #         ptr = []
-                #         if p.terms:
-                #             j = i
-                #             for c in p.terms:
-                #                 j += 1
-                #                 ptr.append(j)
-                #                 stack.append(j)
-                #                 stack.append(c)
-
-                #         await con.execute('''
-                #         insert into prerequisite (id, idx, val, ptr)
-                #         values (%d, %d, '%s', array%s)
-                #         ''' % (course_id, i, v, ptr))
+                if prerequisite:
+                    stack = [(0, prerequisite)]
+                    cnt = 0
+                    while stack:
+                        i, p = stack.pop()
+                        if isinstance(p, CoursePrerequisite):
+                            await con.execute('''
+                            insert into prerequisite (id, idx, val)
+                            values ('%s', %d, '%s')
+                            ''' % (course_id, i, p.course_id))
+                        else:
+                            if isinstance(p, AndPrerequisite):
+                                v = 'AND'
+                            if isinstance(p, OrPrerequisite):
+                                v = 'OR'
+                            ptr = []
+                            for c in p.terms:
+                                cnt += 1
+                                ptr.append(cnt)
+                                stack.append((cnt, c))
+                            await con.execute('''
+                            insert into prerequisite (id, idx, val, ptr)
+                            values ('%s', %d, '%s', array%s)
+                            ''' % (course_id, i, v, ptr))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
