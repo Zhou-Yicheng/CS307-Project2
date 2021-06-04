@@ -23,32 +23,31 @@ class course_service(CourseService):
                 values ('%s', '%s', %d, %d, '%s')
                 ''' % (course_id, course_name, credit, class_hour, grading.name
                        ))
-                if prerequisite:
-                    stack = [0, prerequisite]
-                    while stack:
-                        i = stack.pop()
-                        p = stack.pop()
-                        if isinstance(p, AndPrerequisite):
-                            v = 'AND'
-                        elif isinstance(p, OrPrerequisite):
-                            v = 'OR'
-                        elif isinstance(p, CoursePrerequisite):
-                            v = p.course_id
-                        else:
-                            pass
+                # if prerequisite:
+                #     stack = [0, prerequisite]
+                #     while stack:
+                #         i = stack.pop()
+                #         p = stack.pop()
+                #         if isinstance(p, AndPrerequisite):
+                #             v = 'AND'
+                #         elif isinstance(p, OrPrerequisite):
+                #             v = 'OR'
+                #         elif isinstance(p, CoursePrerequisite):
+                #             v = p.course_id
 
-                        j = i
-                        ptr = []
-                        for c in p.terms:
-                            j += 1
-                            ptr.append(j)
-                            stack.append(j)
-                            stack.append(c)
+                #         ptr = []
+                #         if p.terms:
+                #             j = i
+                #             for c in p.terms:
+                #                 j += 1
+                #                 ptr.append(j)
+                #                 stack.append(j)
+                #                 stack.append(c)
 
-                        await con.execute('''
-                        insert into prerequisite (id, idx, val, ptr)
-                        values (%d, %d, '%s', array%s)
-                        ''' % (course_id, i, v, ptr))
+                #         await con.execute('''
+                #         insert into prerequisite (id, idx, val, ptr)
+                #         values (%d, %d, '%s', array%s)
+                #         ''' % (course_id, i, v, ptr))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
@@ -78,7 +77,7 @@ class course_service(CourseService):
             try:
                 return await con.fetchval('''
                 insert into class (section, instructor, day_of_week, \
-                    week_list, class_begin, class_end)
+                    week_list, class_begin, class_end, location)
                 values (%d, %d, '%s', array%s, %d, %d, '%s')
                     returning id
                 ''' % (section_id, instructor_id, day_of_week.name,
@@ -173,13 +172,14 @@ class course_service(CourseService):
             -> List[CourseSectionClass]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
-            select *
+            select class.id, instructor, full_name, day_of_week,
+                week_list, class_begin, class_end, location
             from class
                 join instructor on class.instructor = instructor.id
             where section = %d
             ''' % section_id)
             if res:
-                return [CourseSectionClass(r['class.id'],
+                return [CourseSectionClass(r['id'],
                                            Instructor(r['instructor'],
                                                       r['full_name']),
                                            DayOfWeek[r['day_of_week']],
@@ -196,7 +196,8 @@ class course_service(CourseService):
                                                 ) -> List[Student]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
-            select student.*, major.*, department.*
+            select student.id, full_name, enrolled_date, major, major.name as
+                major_name, department, department.name as department_name
             from student
                 join takes on student.id = student_id
                 join section on section_id = section.id
@@ -205,13 +206,13 @@ class course_service(CourseService):
             where course = %d and semester = %d
             ''' % (course_id, semester_id))
             if res:
-                return [Student(r['student.id'],
+                return [Student(r['id'],
                                 r['full_name'],
                                 r['enrolled_date'],
-                                Major(r['major.id'],
-                                      r['major.name'],
-                                      Department(r['department.id'],
-                                                 r['department.name'])
+                                Major(r['major'],
+                                      r['major_name'],
+                                      Department(r['department'],
+                                                 r['department_name'])
                                       )
                                 ) for r in res]
             else:

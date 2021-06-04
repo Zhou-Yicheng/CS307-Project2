@@ -8,7 +8,7 @@ from dto import Major, Department
 
 class major_service(MajorService):
 
-    def __inti__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
 
     async def add_major(self, name: str, department_id: int) -> int:
@@ -30,30 +30,34 @@ class major_service(MajorService):
     async def get_all_majors(self) -> List[Major]:
         async with self.__pool.acquire() as con:
             res = await con.fetch('''
-            select * from
-            major join department on major.department = department.id
+            select major.id, major.name as major_name, department,
+                department.name as department_name
+            from major
+                join department on major.department = department.id
             ''')
             if res:
-                return [Major(r['major.id'],
-                              r['major.name'],
-                              Department(r['department.id'],
-                                         r['department.name']))
+                return [Major(r['id'],
+                              r['major_name'],
+                              Department(r['department'],
+                                         r['department_name']))
                         for r in res]
             else:
                 return []
 
     async def get_major(self, major_id: int) -> Major:
         async with self.__pool.acquire() as con:
-            res = await con.fetchrow('''select * from
-                                    major join department
-                                    on major.department = department.id
-                                    where major.id =
-                      ''' + major_id)
+            res = await con.fetchrow('''
+            select major.id, major.name as major_name, department,
+                department.name as department_name
+            from major
+                join department on major.department = department.id
+            where major.id = %d
+            ''' % major_id)
             if res:
-                return Major(res['major.id'],
-                             res['major.name'],
-                             Department(res['department.id'],
-                                        res['department.name']))
+                return Major(res['id'],
+                             res['major_name'],
+                             Department(res['department'],
+                                        res['department_name']))
             else:
                 raise EntityNotFoundError
 

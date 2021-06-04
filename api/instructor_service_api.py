@@ -13,15 +13,16 @@ class instructor_service(InstructorService):
 
     async def add_instructor(self, user_id: int, first_name: str,
                              last_name: str):
-        if str.isalpha(first_name) and str.isalpha(last_name):
-            full_name = first_name + ' ' + last_name
-        else:
-            full_name = last_name+first_name
+        # if (all(c.isalpha() or c.isspace() for c in first_name) and
+        #         all(c.isalpha() or c.isspace() for c in last_name)):
+        #     full_name = first_name + ' ' + last_name
+        # else:
+        #     full_name = last_name+first_name
         async with self.__pool.acquire() as con:
             try:
                 return await con.execute('''
                 insert into instructor (id, full_name) values (%d, '%s')
-                ''' % (user_id, full_name))
+                ''' % (user_id, last_name))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 

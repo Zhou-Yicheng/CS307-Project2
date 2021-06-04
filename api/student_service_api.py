@@ -17,16 +17,17 @@ class student_service(StudentService):
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
+        # if (all(c.isalpha() or c.isspace() for c in first_name) and
+        #         all(c.isalpha() or c.isspace() for c in last_name)):
+        #     full_name = first_name + ' ' + last_name
+        # else:
+        #     full_name = last_name+first_name
         async with self.__pool.acquire() as con:
-            if str.isascii(first_name) and str.isascii(last_name):
-                full_name = first_name + ' ' + last_name
-            else:
-                full_name = last_name+first_name
             try:
-                await con.excute('''
+                await con.execute('''
                 insert into student (id, full_name, enrolled_date, major)
                 values (%d, '%s', '%s', %d)
-                ''' % (user_id, full_name, enrolled_date, major_id))
+                ''' % (user_id, last_name, enrolled_date, major_id))
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
@@ -49,48 +50,49 @@ class student_service(StudentService):
         async with self.__pool.acquire() as con:
             # res = await con.fetch('''
             sql = '''
-            select select course.*, section.*, array_agg(class.*) as cls
+            select course, course.name as course_name, credit, class_hour,
+                grading, section, section.name as section_name, total_capacity,
+                left_capacity
             from course
                 join section on course.id = section.course and semester = %d
-                join class on section.id = class.secion
-                join instructor on instructor = instructor.id
-            group by course.*, section.*
             order by course.id, course.name, section.name
-            ''' % (semester_id)
+            ''' % semester_id
             res = await con.fetch(sql)
             if res:
                 ans = []
                 for r in res:
-                    cos = Course(r['course.id'],
-                                 r['course.name'],
+                    cos = Course(r['course'],
+                                 r['course_name'],
                                  r['credit'],
                                  r['class_hour'],
                                  CourseGrading[r['grading']])
-                    sec = CourseSection(r['section.id'],
-                                        r['section.name'],
+                    sec = CourseSection(r['section'],
+                                        r['section_name'],
                                         r['total_capacity'],
                                         r['left_capacity'])
-                    cls = [CourseSectionClass(
-                        c['class.id'],
-                        Instructor(c['instructor'],
-                                   c['full_name']),
-                        DayOfWeek[c['day_of_week']],
-                        c['week_list'],
-                        c['class_begin'],
-                        c['class_end'],
-                        c['location']
-                    ) for c in r['cls']]
+                    # cls = [CourseSectionClass(
+                    #     c['id'],
+                    #     Instructor(c['instructor'],
+                    #                c['full_name']),
+                    #     DayOfWeek[c['day_of_week']],
+                    #     c['week_list'],
+                    #     c['class_begin'],
+                    #     c['class_end'],
+                    #     c['location']
+                    # ) for c in r['cls']]
+                    cls = []
                     conflict = []
                     ans.append(CourseSearchEntry(cos, sec, cls, conflict))
                 return ans
             else:
-                raise EntityNotFoundError
+                return []
+                # raise EntityNotFoundError
 
     async def enroll_course(self, student_id: int, section_id: int) \
             -> EnrollResult:
         async with self.__pool.acquire() as con:
             try:
-                sec = await con.fetchval('''
+                sec = await con.fetchrow('''
                 select * from section where id = %d
                 ''' % (section_id))
                 if sec is None:
@@ -143,14 +145,14 @@ class student_service(StudentService):
                                 else:
                                     return EnrollResult.COURSE_CONFLICT_FOUND
 
-                res = await con.fetchrow('''
+                take = await con.fetch('''
                 select null
-                from section
-                where course = '%s'
-                  and semester = %d
-                  and id <> %d
-                ''' % (sec['course'], sec['semester'], section_id))
-                if res:
+                from takes
+                    join section on section_id = section.id
+                        and semester = %d and course = '%s'
+                where student_id = %d
+                ''' % (sec['semester'], sec['course'], student_id))
+                if take:
                     return EnrollResult.COURSE_CONFLICT_FOUND
 
                 if sec['left_capacity'] == 0:
@@ -165,7 +167,7 @@ class student_service(StudentService):
                     update section
                     set left_capacity = left_capacity - 1
                     where id = %d
-                    ''' (section_id))
+                    ''' % (section_id))
                     return EnrollResult.SUCCESS
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
@@ -175,7 +177,7 @@ class student_service(StudentService):
             grade = await con.fetchval('''
             select grade
             from takes
-            where studnet_id = %d and section_id = %d
+            where student_id = %d and section_id = %d
             ''' % (student_id, section_id))
             if grade:
                 raise RuntimeError
@@ -190,8 +192,8 @@ class student_service(StudentService):
                     await con.execute('''
                     update section
                     set left_capacity = left_capacity + 1
-                    where section_id = %d
-                    ''' % (section_id))
+                    where id = %d
+                    ''' % section_id)
 
     async def add_enrolled_course_with_grade(self, student_id: int,
                                              section_id: int,
@@ -204,19 +206,20 @@ class student_service(StudentService):
                     from course
                     where id = (select course from section where section.id=%d)
                     ''' % section_id)
-                    if (grading == 'PASS_OR_FAIL' and isinstance(grade,
-                        PassOrFailGrade) or grading == 'HUNDRED_MARK_SCORE'
-                            and type(grade) == int):
-                        if grade == PassOrFailGrade.PASS:
-                            grade = 'PASS'
-                        if grade == PassOrFailGrade.FAIL:
-                            grade = 'FAIL'
-                        await con.execute('''
-                        insert into takes (student_id, section_id, grade)
-                        values (%d, %d, '%s')
-                        ''' (student_id, section_id, grade))
-                    else:
+                    if grading is None:
+                        raise EntityNotFoundError
+                    if (grading == 'PASS_OR_FAIL' and type(grade) == int or
+                            grading == 'HUNDRED_MARK_SCORE' and
+                            isinstance(grade, PassOrFailGrade)):
                         raise IntegrityViolationError
+                    if grade == PassOrFailGrade.PASS:
+                        grade = 'PASS'
+                    if grade == PassOrFailGrade.FAIL:
+                        grade = 'FAIL'
+                    await con.execute('''
+                    insert into takes (student_id, section_id, grade)
+                    values (%d, %d, '%s')
+                    ''' % (student_id, section_id, grade))
                 else:
                     await con.execute('''
                     insert into takes (student_id, section_id)
@@ -225,7 +228,6 @@ class student_service(StudentService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    # TODO: raise exception maybe like above
     async def set_enrolled_course_grade(self, student_id: int,
                                         section_id: int, grade: Grade):
         async with self.__pool.acquire() as con:
@@ -255,8 +257,8 @@ class student_service(StudentService):
                 order by begin_date
                 ''' % (semester_id, student_id))
                 if res:
-                    return {Course(r['course.id'],
-                                   r['course.name'],
+                    return {Course(r['id'],
+                                   r['name'],
                                    r['credit'],
                                    r['class_hour'],
                                    CourseGrading[r['grading']]
@@ -296,6 +298,7 @@ class student_service(StudentService):
                 join section on section = section.id and semester = %d
                 join takes on section = section_id and student_id = %d
                 join course on section.course = course.id
+                join instructor on instructor = instructor.id
             where %d = ANY(week_list)
             ''' % (semester, student_id, week))
             table = {day: [] for day in DayOfWeek}
@@ -319,25 +322,23 @@ class student_service(StudentService):
             from prerequisite
             where id = '%s'
             order by idx
-            ''' (course_id))
-            if res:
-                return True
-            else:
-                return False
+            ''' % (course_id))
+            return True
 
     async def get_student_major(self, student_id: int) -> Major:
         async with self.__pool.acquire() as con:
             res = await con.fetchrow('''
-            select *
+            select major.id, major.name as major_name, department,
+                department.name as department_name
             from major
                 join department on department = department.id
             where major.id = (select major from student where student.id = %d)
             ''' % student_id)
             if (res):
-                return Major(res['major.id'],
-                             res['major.name'],
-                             Department(res['department.id'],
-                                        res['department.name']
+                return Major(res['id'],
+                             res['major_name'],
+                             Department(res['department'],
+                                        res['department_name']
                                         )
                              )
             else:

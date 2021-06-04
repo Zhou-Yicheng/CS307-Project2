@@ -95,7 +95,7 @@ create table major_course(
 -- TODO: index
 create index on class (section);
 create index on section (course, semester);
-create index on prerequisite (id)
+create index on prerequisite (id);
 
 -- create view coursetable as(
 -- 	select day_of_week,
