@@ -17,12 +17,12 @@ class student_service(StudentService):
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
-        if str.isascii(first_name) and str.isascii(last_name):
-            full_name = first_name + ' ' + last_name
-        else:
-            full_name = last_name+first_name
         async with self.__pool.acquire() as con:
             try:
+                if str.isascii(first_name) and str.isascii(last_name):
+                    full_name = first_name+' '+last_name
+                else:
+                    full_name = first_name+last_name
                 await con.execute('''
                 insert into student (id, full_name, enrolled_date, major)
                 values (%d, '%s', '%s', %d)
@@ -38,12 +38,14 @@ class student_service(StudentService):
                             search_class_time: Optional[int] = None,
                             search_class_locations: List[str] = None,
                             search_course_type: CourseType,
-                            ignore_full: bool, ignore_conflict: bool,
+                            ignore_full: bool,
+                            ignore_conflict: bool,
                             ignore_passed: bool,
                             ignore_missing_prerequisites: bool,
                             page_size: int, page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
+            return []
             sql = '''
             select course.id as course_id, course.name as course_name, credit,
                 class_hour, grading, section.id as section_id, section.name as
@@ -51,11 +53,18 @@ class student_service(StudentService):
             from course
                 join section on course.id = section.course and semester = %d
                 join class on section.id = class.section
+            ''' % semester_id
+            if (search_cid or search_name or search_instructor or
+                search_day_of_week or search_class_time or
+                search_class_locations or search_course_type or
+                ignore_full or ignore_conflict or ignore_passed or
+                    ignore_missing_prerequisites):
+                sql += 'where 1=1 '
+            sql += '''
             group by (course_id, course_name, credit, class_hour, grading,
                 section_id, section_name, total_capacity, left_capacity)
             order by course_id, course_name, section_name
-            ''' % semester_id
-            
+            '''
             res = await con.fetch(sql)
             if res:
                 ans = []
@@ -173,33 +182,37 @@ class student_service(StudentService):
 
     async def drop_course(self, student_id: int, section_id: int):
         async with self.__pool.acquire() as con:
-            grade = await con.fetchval('''
-            select grade
+            take = await con.fetchrow('''
+            select *
             from takes
             where student_id = %d and section_id = %d
             ''' % (student_id, section_id))
-            if grade:
+            if take is None:
+                raise EntityNotFoundError
+            if take['grade']:
                 raise RuntimeError
-            else:
-                async with con.transaction():
-                    res = await con.execute('''
-                    delete from takes
-                    where student_id = %d and section_id = %d
-                    ''' % (student_id, section_id))
-                    if res == 'DELETE 0':
-                        raise EntityNotFoundError
-                    await con.execute('''
-                    update section
-                    set left_capacity = left_capacity + 1
-                    where id = %d
-                    ''' % section_id)
+            async with con.transaction():
+                await con.execute('''
+                delete from takes
+                where student_id = %d and section_id = %d
+                ''' % (student_id, section_id))
+                await con.execute('''
+                update section
+                set left_capacity = left_capacity+1
+                where id = %d
+                ''' % section_id)
 
     async def add_enrolled_course_with_grade(self, student_id: int,
                                              section_id: int,
                                              grade: Optional[Grade]):
         async with self.__pool.acquire() as con:
             try:
-                if grade:
+                if grade is None:
+                    await con.execute('''
+                    insert into takes (student_id, section_id)
+                    values (%d, %d)
+                    ''' % (student_id, section_id))
+                else:
                     grading = await con.fetchval('''
                     select grading
                     from course
@@ -217,11 +230,7 @@ class student_service(StudentService):
                     insert into takes (student_id, section_id, grade)
                     values (%d, %d, '%s')
                     ''' % (student_id, section_id, grade))
-                else:
-                    await con.execute('''
-                    insert into takes (student_id, section_id)
-                    values (%d, %d)
-                    ''' % (student_id, section_id))
+
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
@@ -250,18 +259,25 @@ class student_service(StudentService):
                 from course
                     join section on course.id = section.course and semester =%d
                     join takes on section.id = section_id and student_id = %d
+                ''' % (semester_id, student_id))
+            else:
+                res = await con.fetch('''
+                select course.*, grade
+                from course
+                    join section on course.id = section.course
+                    join takes on section.id = section_id and student_id = %d
                     join semester on section.semester = semester.id
                 order by begin_date
-                ''' % (semester_id, student_id))
-                if res:
-                    return {Course(r['id'],
-                                   r['name'],
-                                   r['credit'],
-                                   r['class_hour'],
-                                   CourseGrading[r['grading']]
-                                   ): self.dto(r['grade']) for r in res}
-                else:
-                    raise EntityNotFoundError
+                ''' % student_id)
+            if res:
+                return {Course(r['id'],
+                               r['name'],
+                               r['credit'],
+                               r['class_hour'],
+                               CourseGrading[r['grading']]
+                               ): self.dto(r['grade']) for r in res}
+            else:
+                raise EntityNotFoundError
 
     def dto(grade: str) -> Grade:
         if grade == 'PASS':
