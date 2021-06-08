@@ -87,7 +87,7 @@ create table takes (
 create table major_course(
 	major_id		integer references major ON DELETE CASCADE,
 	course_id		varchar references course ON DELETE CASCADE,
-	course_type		varchar not null,
+	course_type		char(1) not null,
 	CHECK (course_type in ('C', 'E')),
 	PRIMARY KEY (major_id, course_id)
 );

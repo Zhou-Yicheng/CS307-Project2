@@ -45,30 +45,122 @@ class student_service(StudentService):
                             page_size: int, page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
-            return []
+            major = await con.fetchval('select major from student where id =%d'
+                                       % student_id)
+            # Head
             sql = '''
             select course.id as course_id, course.name as course_name, credit,
                 class_hour, grading, section.id as section_id, section.name as
-                section_name, total_capacity, left_capacity, array_agg(class)
+                section_name, total_capacity, left_capacity, array_agg(class.*)
+                as cls, array_agg(instructor.*) as ins
             from course
                 join section on course.id = section.course and semester = %d
                 join class on section.id = class.section
-            ''' % semester_id
-            if (search_cid or search_name or search_instructor or
-                search_day_of_week or search_class_time or
-                search_class_locations or search_course_type or
-                ignore_full or ignore_conflict or ignore_passed or
-                    ignore_missing_prerequisites):
-                sql += 'where 1=1 '
+                join instructor on class.instructor = instructor.id
+            where 1=1 ''' % semester_id
+            # Body
+            if search_cid:
+                sql += "and course.id ~ '%s' " % search_cid
+            if search_name:
+                sql += "and course.name||'['||section.name||']' like '%%%s%%'"\
+                    % search_name
+            if search_instructor:
+                sql += "and full_name ~ '%s' " % search_instructor
+            if search_day_of_week:
+                sql += "and day_of_week = '%s' " % search_day_of_week.name
+            if search_class_time:
+                sql += "and %d between class_begin and class_end " \
+                    % search_class_time
+            if search_class_locations:
+                sql += "and location ~ ANY(array%s) " % search_class_locations
+            if search_course_type is CourseType.ALL:
+                pass
+            if search_course_type is CourseType.MAJOR_COMPULSORY:
+                sql += '''
+                and course in (
+                    select course_id
+                    from major_course
+                    where major_id = %d and course_type = 'C'
+                ) ''' % major
+            if search_course_type is CourseType.MAJOR_ELECTIVE:
+                sql += '''
+                and course in (
+                    select course_id
+                    from major_course
+                    where major_id = %d and course_type = 'E'
+                ) ''' % major
+            if search_course_type is CourseType.CROSS_MAJOR:
+                sql += '''
+                and course in (
+                    select course_id
+                    from major_course
+                    where major_id <> %d
+                ) ''' % major
+            if search_course_type is CourseType.PUBLIC:
+                sql += 'and course NOT in (select course_id from major_course)'
+            if ignore_full:
+                sql += 'and left_capacity > 0 '
+            if ignore_conflict:
+                sql += '''
+                and NOT exists (
+                    select null
+                    from class c
+                      join section on c.section = section.id and semester = %d
+                      join takes on c.section = section_id and student_id = %d
+                    where class.week_list && c.week_list
+                      and class.day_of_week = c.day_of_week
+                      and NOT (class.class_end < c.class_begin or
+                               class.class_begin > c.class_end)
+                ) ''' % (semester_id, student_id)
+                sql += '''
+                and section.course NOT in (
+                    select course
+                    from takes
+                        join section on section_id = section.id
+                            and student_id = %d and semester = %d
+                ) ''' % (student_id, semester_id)
+            if ignore_passed:
+                sql += '''
+                and section.id NOT in (
+                    select section_id
+                    from takes
+                    where student_id = %d
+                        and grade <> 'FAIL'
+                        and (grade = 'PASS' or cast(grade as integer) >= 60)
+                ) ''' % student_id
+            # TODO: prerequisite
+            if ignore_missing_prerequisites:
+                sql += '''
+                and NOT exists (
+                    select course
+                    from takes
+                        join section on section_id = section.id
+                            and student_id = %d
+                            and grade <> 'FAIL'
+                            and (grade = 'PASS' or cast(grade as integer) >=60)
+                )
+                (
+                    select *
+                    from prerequisites
+                    where id = course.id
+                )
+                ''' % student_id
+            # End
             sql += '''
-            group by (course_id, course_name, credit, class_hour, grading,
-                section_id, section_name, total_capacity, left_capacity)
+            group by course_id, course_name, credit, class_hour, grading,
+                section_id, section_name, total_capacity, left_capacity
             order by course_id, course_name, section_name
-            '''
+            limit %d offset %d ''' % (page_size, page_size*page_index)
+
             res = await con.fetch(sql)
-            if res:
+
+            if not res:
+                return []
+            else:
                 ans = []
                 for r in res:
+                    ins = {i['id']: Instructor(i['id'], i['full_name'])
+                           for i in r['ins']}
                     cos = Course(r['course_id'],
                                  r['course_name'],
                                  r['credit'],
@@ -79,19 +171,16 @@ class student_service(StudentService):
                                         r['total_capacity'],
                                         r['left_capacity'])
                     cls = [CourseSectionClass(c['id'],
-                                              Instructor(c['instructor'],
-                                                         await con.fetchval('select full_name from instructor where id=%d'%c['instructor'])),
+                                              ins[c['instructor']],
                                               DayOfWeek[c['day_of_week']],
                                               c['week_list'],
                                               c['class_begin'],
                                               c['class_end'],
                                               c['location']
-                                              ) for c in r['array_agg']]
-                    conflict = []
+                                              ) for c in r['cls']]
+                    conflict = []   # TODO: %course_name[%section_name] sort
                     ans.append(CourseSearchEntry(cos, sec, cls, conflict))
                 return ans
-            else:
-                return []
 
     async def enroll_course(self, student_id: int, section_id: int) \
             -> EnrollResult:
@@ -99,67 +188,79 @@ class student_service(StudentService):
             try:
                 sec = await con.fetchrow('''
                 select * from section where id = %d
-                ''' % (section_id))
+                ''' % section_id)
                 if sec is None:
                     return EnrollResult.COURSE_NOT_FOUND
 
-                enroll = await con.fetchrow('''
+                took = await con.fetchrow('''
                 select null
                 from takes
                 where student_id = %d and section_id = %d
                 ''' % (student_id, section_id))
-                if enroll:
+                if took:
                     return EnrollResult.ALREADY_ENROLLED
 
                 grade = await con.fetch('''
                 select grade
                 from takes
                 where student_id = %d
-                  and section_id in (
-                                     select id
-                                     from section
-                                     where course = '%s'
-                                     )
+                  and section_id in (select id from section where course ='%s')
                 ''' % (student_id, sec['course']))
-                if (grade
-                    and grade[-1][0]
-                    and (grade[-1][0] == PassOrFailGrade.PASS
-                         or grade[-1][0] >= 60)):
-                    return EnrollResult.ALREADY_PASSED
+                if (grade and grade[-1][0]):
+                    if grade[-1][0] == 'PASS':
+                        return EnrollResult.ALREADY_PASSED
+                    if grade[-1][0] != 'FAIL' and int(grade[-1][0]) >= 60:
+                        return EnrollResult.ALREADY_PASSED
 
                 pas = await self.passed_prerequisites_for_course(student_id,
                                                                  sec['course'])
                 if not pas:
                     return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
-                time = await con.fetch('''
-                select day_of_week, class_begin, class_end
-                from class
-                    join section on section = section.id and semester = %d
-                    join takes on section = section_id and student_id = %d
-                ''' % (sec['semester'], student_id))
-                this = await con.fetch('''
-                select day_of_week, class_begin, class_end
-                from class
-                where section = %d
-                ''' % (section_id))
-                if time and this:
-                    for t in time:
-                        for c in this:
-                            if t['day_of_week'] == c['day_of_week']:
-                                if (t['class_end'] < c['class_begin'] or
-                                        t['class_begin'] > c['class_end']):
-                                    pass
-                                else:
-                                    return EnrollResult.COURSE_CONFLICT_FOUND
+                # time = await con.fetch('''
+                # select week_list, day_of_week, class_begin, class_end
+                # from class
+                #     join section on section = section.id and semester = %d
+                #     join takes on section = section_id and student_id = %d
+                # ''' % (sec['semester'], student_id))
+                # this = await con.fetch('''
+                # select week_list, day_of_week, class_begin, class_end
+                # from class
+                # where section = %d
+                # ''' % (section_id))
+                # if time and this:
+                #     for t in time:
+                #         for c in this:
+                #             if t['day_of_week'] == c['day_of_week']:
+                #                 if (t['class_end'] < c['class_begin'] or
+                #                         t['class_begin'] > c['class_end']):
+                #                     pass
+                #                 else:
+                #                     return EnrollResult.COURSE_CONFLICT_FOUND
+
+                # HACK: inspiration from Leo
+                res = await con.fetch('''
+                select null
+                from class self, class other
+                where self.section = %d
+                  and other.section in(
+                        select section_id
+                        from takes join section on section_id = section.id
+                            and student_id = %d and semester = %d)
+                  and self.week_list && other.week_list
+                  and self.day_of_week = other.day_of_week
+                  and NOT (self.class_end < other.class_end or
+                           self.class_begin > other.class_end)
+                ''' % (section_id, student_id, sec['semester']))
+                if res:
+                    return EnrollResult.COURSE_CONFLICT_FOUND
 
                 take = await con.fetch('''
                 select null
                 from takes
                     join section on section_id = section.id
-                        and semester = %d and course = '%s'
-                where student_id = %d
-                ''' % (sec['semester'], sec['course'], student_id))
+                        and student_id = %d and semester = %d and course = '%s'
+                ''' % (student_id, sec['semester'], sec['course']))
                 if take:
                     return EnrollResult.COURSE_CONFLICT_FOUND
 
@@ -222,9 +323,9 @@ class student_service(StudentService):
                             grading == 'HUNDRED_MARK_SCORE' and
                             isinstance(grade, PassOrFailGrade)):
                         raise IntegrityViolationError
-                    if grade == PassOrFailGrade.PASS:
+                    if grade is PassOrFailGrade.PASS:
                         grade = 'PASS'
-                    if grade == PassOrFailGrade.FAIL:
+                    if grade is PassOrFailGrade.FAIL:
                         grade = 'FAIL'
                     await con.execute('''
                     insert into takes (student_id, section_id, grade)
@@ -237,9 +338,9 @@ class student_service(StudentService):
     async def set_enrolled_course_grade(self, student_id: int,
                                         section_id: int, grade: Grade):
         async with self.__pool.acquire() as con:
-            if grade == PassOrFailGrade.PASS:
+            if grade is PassOrFailGrade.PASS:
                 grade = 'PASS'
-            if grade == PassOrFailGrade.FAIL:
+            if grade is PassOrFailGrade.FAIL:
                 grade = 'FAIL'
             res = await con.execute('''
             update takes
@@ -295,7 +396,7 @@ class student_service(StudentService):
             select day_in_semester_week('%s')
             ''' % date)
             if semester is None or week is None:
-                raise EntityNotFoundError
+                return {day: [] for day in DayOfWeek}
 
             res = await con.fetch('''
             select day_of_week,
@@ -335,16 +436,18 @@ class student_service(StudentService):
             ''' % course_id)
             if not res:
                 return True
-            take = await con.fetch('''
+            pas = await con.fetch('''
             select course
             from takes
                 join section on section_id = section.id
             where student_id = %d
+              and grade <> 'FAIL'
+              and (grade = 'PASS' or cast(grade as integer) >= 60)
             ''' % student_id)
-            take = list(take)
+            pas = [str(t['course']) for t in pas]
 
             stack = [0]
-            val = [0 for i in range(len(res))]
+            val = [False for i in range(len(res))]
             visited = [False for i in range(len(res))]
             while stack:
                 i = stack[-1]
@@ -361,7 +464,7 @@ class student_service(StudentService):
                         for j in res[i]['ptr']:
                             stack.append(j)
                     else:
-                        val[i] = (res[i]['val'] in take)
+                        val[i] = (res[i]['val'] in pas)
                         stack.pop()
             return val[0]
 

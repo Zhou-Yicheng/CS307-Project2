@@ -11,7 +11,7 @@ from typing import Optional
 import humps
 from tqdm import tqdm
 
-from dto import AndPrerequisite, OrPrerequisite, CoursePrerequisite, PassOrFailGrade, CourseSearchEntry, Course, \
+from dto import AndPrerequisite, Instructor, OrPrerequisite, CoursePrerequisite, PassOrFailGrade, CourseSearchEntry, Course, \
     CourseSection, CourseSectionClass, CourseType, DayOfWeek, EnrollResult, CourseTableEntry, CourseGrading
 from factory import ServiceFactory, create_async_context
 from service import CourseService, DepartmentService, SemesterService, StudentService, MajorService, UserService, \
@@ -19,6 +19,7 @@ from service import CourseService, DepartmentService, SemesterService, StudentSe
 
 sid = {}
 sec_id = {}
+cid = {}
 did = {}
 mid = {}
 
@@ -81,10 +82,11 @@ async def test_add_course():
                     sec_id[ss['id']] = section_id
                     cls = cscs[f"{ss['id']}"][1]
                     for cl in cls:
-                        await rcs.add_course_section_class(section_id, cl['instructor']['id'],
+                        class_id = await rcs.add_course_section_class(section_id, cl['instructor']['id'],
                                                            DayOfWeek[cl['dayOfWeek']],
                                                            cl['weekList'], cl['classBegin'], cl['classEnd'],
                                                            cl['location'])
+                        cid[cl['id']] = class_id
 
 
 async def test_add_semester():
@@ -111,8 +113,14 @@ async def test_add_major():
 
 
 async def test_add_major_course():
-    await asyncio.gather(*[(rms.add_major_compulsory_course(mid[int(k)], c) for c in cc[1]) for k, cc in mcc.items()])
-    await asyncio.gather(*[(rms.add_major_elective_course(mid[int(k)], c) for c in ec[1]) for k, ec in mec.items()])
+    gather = []
+    for k in mcc:
+        for c in mcc[k][1]:
+            gather.append(rms.add_major_compulsory_course(mid[int(k)], c))
+    for k in mec:
+        for c in mec[k][1]:
+            gather.append(rms.add_major_elective_course(mid[int(k)], c))
+    await asyncio.gather(*gather)
 
 
 async def test_add_user():
@@ -124,8 +132,9 @@ async def test_add_user():
                                    u['fullName'].split(',')[1], datetime.fromtimestamp(u['enrolledDate'] / 1000).date())
     await asyncio.gather(*[one_iter(u) for u in us])
 
+
 async def test_select_course():
-    failed_cnt = 0
+    gather = []
     for k, s in sc.items():
         for si, c in s.items():
             if si != '@type':
@@ -136,45 +145,101 @@ async def test_select_course():
                         grade = c['mark']
                 else:
                     grade = None
-                await rsts.add_enrolled_course_with_grade(int(k), sec_id[int(si)], grade)
+                gather.append(rsts.add_enrolled_course_with_grade(int(k), sec_id[int(si)], grade))
+    await asyncio.gather(*gather)
+    gather = []
     for k, s in tqdm(sc.items()):
         for si, c in s.items():
             if si != '@type':
                 if c is not None:
-                    try:
-                        await rsts.drop_course(int(k), sec_id[int(si)])
-                        failed_cnt += 1
-                        # print('\n' + k + ' ' + str(sec_id[int(si)]))
-                    except:
-                        pass
-    print(f"There are {failed_cnt} failed to throw exception")
+                    gather.append(rsts.drop_course(int(k), sec_id[int(si)]))
+    try:
+        print(len(gather))
+        await asyncio.gather(*gather)
+        print("There are failed to throw exception")
+    except:
+        pass
+
+
+# async def test_course_table(path):
+#     match_cnt = 0
+#     fail_cnt = 0
+#     for x in os.listdir(path):
+#         if (not x.endswith('.json')) or 'Result' in x:
+#             continue
+#         params = json.load(open(f'{path}/{x}', encoding='utf-8'))
+#         ans = json.load(open(f'{path}/{x.split(".")[0]}Result.json', encoding='utf-8'))
+#         for k, p in enumerate(params):
+#             a = ans[k]
+#             s, d = p[1][0], int(p[1][1])
+#             d = datetime(1970, 1, 1) + timedelta(days=d)
+#             r = await rsts.get_course_table(s, d.date())
+#             for k, v in a['table'].items():
+#                 match = 0
+#                 for x in v:
+#                     for z in r[DayOfWeek[k]]:
+#                         if z == CourseTableEntry(**humps.decamelize(x)):
+#                             match += 1
+#                 if match != len(v):
+#                     fail_cnt += 1
+#                     print(s, d.date())
+#                 else:
+#                     match_cnt += 1
+#     if fail_cnt:
+#         print(f'COURSE TABLE FAIL COUNT: {fail_cnt}')
+#     else:
+#         print(f'COURSE TABLE MATCH COUNT: {match_cnt}')
 
 
 async def test_course_table(path):
-    fail_cnt = 0
-    for x in os.listdir(path):
-        if (not x.endswith('.json')) or 'Result' in x:
-            continue
-        params = json.load(open(f'{path}/{x}', encoding='utf-8'))
-        ans = json.load(open(f'{path}/{x.split(".")[0]}Result.json', encoding='utf-8'))
-        for i, p in enumerate(params):
-            a = ans[i]
-            s, d = p[1][0], int(p[1][1])
-            d = datetime(1970, 1, 1) + timedelta(days=d)
-            r = await rsts.get_course_table(s, d.date())
-            for k, v in a['table'].items():
-                match = 0
-                for x in v:
-                    for z in r[DayOfWeek[k]]:
-                        if z == CourseTableEntry(**humps.decamelize(x)):
-                            match += 1
-                if match != len(v):
-                    fail_cnt += 1
-    print(f'COURSE TABLE FAIL COUNT: {fail_cnt}')
-    return fail_cnt
+    cnt = 0
+    x = 'courseTable.json'
+    y = 'courseTableResult.json'
+    param = json.load(open(f'{path}/{x}', encoding='utf-8'))
+    ans = json.load(open(f'{path}/{y}', encoding='utf-8'))
+    tab = []
+    for a in ans:
+        tab.append({DayOfWeek[k]: [CourseTableEntry(e['courseFullName'],
+                                                    Instructor(e['instructor']['id'],
+                                                               e['instructor']['fullName']
+                                                               ),
+                                                    e['classBegin'],
+                                                    e['classEnd'],
+                                                    e['location']
+                                                    ) for e in a['table'][k]
+                                   ] for k in a['table']
+                    }
+                   )
+    gather = []
+    for i, p in enumerate(param):
+        a = ans[i]
+        s = p[1][0]
+        d = p[1][1]
+        d = datetime.fromtimestamp(d*86400).date()
+        gather.append(rsts.get_course_table(s, d))
+
+    print(len(gather))
+    start = time()
+    res = await asyncio.gather(*gather)
+    print(time() - start)
+
+    def contains(s, t):
+        for e in t:
+            if e not in s:
+                return False
+        return True
+
+    for t, r in zip(tab, res):
+        if contains(t, r) and contains(r, t):
+            cnt += 1
+        else:
+            for k in sorted(r):
+                print(f'{k}: {r[k]}')
+    print(f'Test course table: {cnt}')
 
 
 async def test_enroll_course(path):
+    cnt = 0
     for x in os.listdir(path):
         if (not x.endswith('.json')) or 'Result' in x:
             continue
@@ -182,6 +247,7 @@ async def test_enroll_course(path):
         ans = json.load(open(f'{path}/{x.split(".")[0]}Result.json'))
         ls = []
         for i, p in enumerate(params):
+            cnt += 1
             a = ans[i]
             s, cl = p[1][0], int(p[1][1])
             if cl in sec_id:
@@ -191,16 +257,20 @@ async def test_enroll_course(path):
                 print(f'Enroll result error: {res}, expected: {EnrollResult[a[1]]}')
             if res is EnrollResult.SUCCESS:
                 ls.append((s, cl))
+        ok = 0
         for s, cl in ls:
             try:
                 await rsts.drop_course(s, cl)
+                ok += 1
             except:
                 print(f"DROP FAILED {s}, {cl}")
+        print(f'Test drop course: {ok}')
+    print(f'Test enroll course: {cnt}')
 
 
 async def json_query_reader(f):
     query = json.load(f)
-    res = []
+    gather = []
     for q in query:
         x = q[1]
         if x[8] is not None:
@@ -209,15 +279,15 @@ async def json_query_reader(f):
             x[5] = DayOfWeek[x[5][1]]
         if x[7] is not None:
             x[7] = x[7][1]
-        res.append(await rsts.search_course(student_id=x[0], semester_id=sid[x[1]], search_cid=x[2], search_name=x[3],
-                                            search_instructor=x[4],
-                                            search_day_of_week=x[5], search_class_time=x[6],
-                                            search_class_locations=x[7],
-                                            search_course_type=x[8], ignore_full=x[9], ignore_conflict=x[10],
-                                            ignore_passed=x[11],
-                                            ignore_missing_prerequisites=x[12], page_size=x[13],
-                                            page_index=x[14]))
-    return res
+        gather.append(rsts.search_course(student_id=x[0], semester_id=sid[x[1]], search_cid=x[2], search_name=x[3],
+                                         search_instructor=x[4],
+                                         search_day_of_week=x[5], search_class_time=x[6],
+                                         search_class_locations=x[7],
+                                         search_course_type=x[8], ignore_full=x[9], ignore_conflict=x[10],
+                                         ignore_passed=x[11],
+                                         ignore_missing_prerequisites=x[12], page_size=x[13],
+                                         page_index=x[14]))
+    return await asyncio.gather(*gather)
 
 
 async def json_answer_reader(f):
@@ -226,11 +296,17 @@ async def json_answer_reader(f):
     for a in ans:
         r = []
         for e in a[1]:
+            # entry = CourseSearchEntry(
+            #     Course(**humps.decamelize(e['course'])),
+            #     CourseSection(**humps.decamelize(e['section'])),
+            #     [CourseSectionClass(**humps.decamelize(k)) for k in e['sectionClasses']],
+            #     [s for s in e['conflictCourseNames']]
+            # )
             entry = CourseSearchEntry(
-                Course(**humps.decamelize(e['course'])),
-                CourseSection(**humps.decamelize(e['section'])),
-                [CourseSectionClass(**humps.decamelize(k)) for k in e['sectionClasses']],
-                [s for s in e['conflictCourseNames']]
+                Course(e['course']['id'], e['course']['name'], e['course']['credit'], e['course']['classHour'], CourseGrading[e['course']['grading']]),
+                CourseSection(sec_id[e['section']['id']], e['section']['name'], e['section']['totalCapacity'], e['section']['leftCapacity']),
+                [CourseSectionClass(cid[c['id']], Instructor(c['instructor']['id'], c['instructor']['fullName']), DayOfWeek[c['dayOfWeek']], c['weekList'], c['classBegin'], c['classEnd'], c['location']) for c in e['sectionClasses']],
+                e['conflictCourseNames']
             )
             r.append(entry)
         res.append(r)
@@ -239,7 +315,9 @@ async def json_answer_reader(f):
 
 async def test_query(path: str):
     ok = 0
+    cnt = 0
     for x in os.listdir(path):
+        print(x)
         if (not x.endswith('.json')) or 'Result' in x:
             continue
         res = await json_query_reader(open(f'{path}/{x}', encoding='utf-8'))
@@ -247,10 +325,21 @@ async def test_query(path: str):
         for (r, a) in zip(res, ans):
             if r == a:
                 ok += 1
+            else:
+                cnt += 1
+                for e in a:
+                    print(e.course)
+                    print(e.section)
+                    for c in sorted(e.section_classes):
+                        print(c)
+
+
     print(f'Test search course: {ok}')
+    print(f'Test search course fail: {cnt}')
 
 
 async def main():
+    begin = time()
     async with create_async_context() as context:
         factory = ServiceFactory(context)
         if hasattr(factory, 'async_init') and callable(getattr(factory, 'async_init')):
@@ -275,31 +364,41 @@ async def main():
         await test_add_semester()
         print('Add courses')
         await test_add_course()
-        # print('Add major courses')
-        # await test_add_major_course()
+        print('Add major courses')
+        await test_add_major_course()
         print(f'Add time usage: {time() - start}s')
+
         print('Test search course 1')
         start = time()
         await test_query('data/searchCourse1')
         print(f'Test search course 1: {time() - start}s')
-        print('Test enroll 1')
-        start = time()
-        await test_enroll_course('data/enrollCourse1')
-        print(f'Test enroll course 1: {time() - start}s')
-        print('Add student courses')
-        await test_select_course()
-        print('Test search course 2')
-        start = time()
-        await test_query('data/searchCourse2')
-        print(f'Test search course 2: {time() - start}s')
-        print('Test course table 2')
-        start = time()
-        await test_course_table('data/courseTable2')
-        print(f'Test course table 2: {time() - start}s')
-        print('Test enroll course 2')
-        start = time()
-        await test_enroll_course('data/enrollCourse2')
-        print(f'Test enroll course 2: {time() - start}s')
+
+        # print('Test enroll 1')
+        # start = time()
+        # await test_enroll_course('data/enrollCourse1')
+        # print(f'Test enroll course 1: {time() - start}s')
+
+        # start = time()
+        # print('Add student courses')
+        # await test_select_course()
+        # print(f'Test add student courses: {time() - start}s')
+
+        # print('Test search course 2')
+        # start = time()
+        # await test_query('data/searchCourse2')
+        # print(f'Test search course 2: {time() - start}s')
+
+        # print('Test course table 2')
+        # start = time()
+        # await test_course_table('data/courseTable2')
+        # print(f'Test course table 2: {time() - start}s')
+
+        # print('Test enroll course 2')
+        # start = time()
+        # await test_enroll_course('data/enrollCourse2')
+        # print(f'Test enroll course 2: {time() - start}s')
+    end = time()
+    print(f'total time: {(end-begin)/60}min')
 
 
 if __name__ == '__main__':

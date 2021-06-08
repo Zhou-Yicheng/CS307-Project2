@@ -85,7 +85,7 @@ class Department:
     name: str
 
     def __eq__(self, other):
-        return self.name == self.name
+        return self.name == other.name
 
 
 @dataclass()
@@ -167,9 +167,6 @@ class CourseSectionClass:
         return self.instructor == other.instructor and self.day_of_week == other.day_of_week \
                and sorted(self.week_list) == sorted(other.week_list) and self.class_begin == other.class_begin \
                and self.class_end == other.class_end and self.location == other.location
-
-    def __hash__(self):
-        return 0
 
 
 @dataclass()
