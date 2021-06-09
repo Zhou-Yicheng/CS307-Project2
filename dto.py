@@ -136,10 +136,9 @@ class Course:
 
     def __eq__(self, other):
         if isinstance(other.grading, str):
-            return self.name == other.name and self.credit == other.credit and self.class_hour == other.class_hour and self.grading == \
-                   CourseGrading[other.grading]
+            return self.id == other.id and self.name == other.name and self.credit == other.credit and self.class_hour == other.class_hour and self.grading == CourseGrading[other.grading]
         else:
-            return self.name == other.name and self.credit == other.credit and self.class_hour == other.class_hour and self.grading == other.grading
+            return self.id == other.id and self.name == other.name and self.credit == other.credit and self.class_hour == other.class_hour and self.grading == other.grading
 
 
 @dataclass()
@@ -164,9 +163,20 @@ class CourseSectionClass:
     location: str
 
     def __eq__(self, other):
-        return self.instructor == other.instructor and self.day_of_week == other.day_of_week \
-               and sorted(self.week_list) == sorted(other.week_list) and self.class_begin == other.class_begin \
-               and self.class_end == other.class_end and self.location == other.location
+        if isinstance(other.day_of_week, str):
+            return self.instructor == other.instructor \
+                and self.day_of_week == DayOfWeek[other.day_of_week] \
+                and self.week_list == other.week_list \
+                and self.class_begin == other.class_begin \
+                and self.class_end == other.class_end \
+                and self.location == other.location
+        else:
+            return self.instructor == other.instructor \
+                and self.day_of_week == other.day_of_week \
+                and self.week_list == other.week_list \
+                and self.class_begin == other.class_begin \
+                and self.class_end == other.class_end \
+                and self.location == other.location
 
 
 @dataclass()
@@ -177,14 +187,15 @@ class CourseSearchEntry:
     conflict_course_names: List[str]
 
     def __eq__(self, other):
-        cnt = 0
-        for c in self.section_classes:
-            for x in other.section_classes:
-                if c == x:
-                    cnt = cnt + 1
-        return self.course == other.course and self.section == other.section \
-               and cnt == len(self.section_classes) \
-               #and self.conflict_course_names == other.conflict_course_names
+        def contains(A, B):
+            for b in B:
+                if b not in A:
+                    return False
+            return True
+        return self.course == other.course \
+            and self.section == other.section \
+            and contains(self.section_classes, other.section_classes) and contains(other.section_classes, self.section_classes) \
+            and sorted(self.conflict_course_names) == sorted(other.conflict_course_names)
 
 
 @dataclass()
@@ -196,10 +207,11 @@ class CourseTableEntry:
     location: str
 
     def __eq__(self, other):
-        return self.course_full_name == other.course_full_name and self.instructor == other.instructor \
-               and self.class_begin == other.class_begin \
-               and self.class_end == other.class_end \
-               and self.location == other.location
+        return self.course_full_name == other.course_full_name \
+            and self.instructor == other.instructor \
+            and self.class_begin == other.class_begin \
+            and self.class_end == other.class_end \
+            and self.location == other.location
 
 
 CourseTable = Mapping[DayOfWeek, List[CourseTableEntry]]

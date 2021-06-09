@@ -193,7 +193,6 @@ class ServiceFactory:
   #### Resource Consumption
 
     - Memory Consumption: How much memory your database takes?
-
     - Disk Consumption: How much disk space your database takes? How are they distributed? (index, data, other info?)
 
   #### Speed
@@ -217,7 +216,6 @@ class ServiceFactory:
   #### Correctness
 
     - Malformed Data Identification: Can your database identify the malformed data automatically?
-
     - ACID Principle
 
 
