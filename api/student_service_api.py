@@ -129,22 +129,22 @@ class student_service(StudentService):
                         and (grade = 'PASS' or cast(grade as integer) >= 60)
                 ) ''' % student_id
             # TODO: prerequisite
-            if ignore_missing_prerequisites:
-                sql += '''
-                and NOT exists (
-                    select course
-                    from takes
-                        join section on section_id = section.id
-                            and student_id = %d
-                            and grade <> 'FAIL'
-                            and (grade = 'PASS' or cast(grade as integer) >=60)
-                )
-                (
-                    select *
-                    from prerequisites
-                    where id = course.id
-                )
-                ''' % student_id
+            # if ignore_missing_prerequisites:
+            #     sql += '''
+            #     and NOT exists (
+            #         select course
+            #         from takes
+            #             join section on section_id = section.id
+            #                 and student_id = %d
+            #                 and grade <> 'FAIL'
+            #                 and (grade = 'PASS' or cast(grade as integer) >=60)
+            #     )
+            #     (
+            #         select *
+            #         from prerequisites
+            #         where id = course.id
+            #     )
+            #     ''' % student_id
             # End
             sql += '''
             group by course_id, course_name, credit, class_hour, grading,
@@ -217,27 +217,6 @@ class student_service(StudentService):
                 if not pas:
                     return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
-                # time = await con.fetch('''
-                # select week_list, day_of_week, class_begin, class_end
-                # from class
-                #     join section on section = section.id and semester = %d
-                #     join takes on section = section_id and student_id = %d
-                # ''' % (sec['semester'], student_id))
-                # this = await con.fetch('''
-                # select week_list, day_of_week, class_begin, class_end
-                # from class
-                # where section = %d
-                # ''' % (section_id))
-                # if time and this:
-                #     for t in time:
-                #         for c in this:
-                #             if t['day_of_week'] == c['day_of_week']:
-                #                 if (t['class_end'] < c['class_begin'] or
-                #                         t['class_begin'] > c['class_end']):
-                #                     pass
-                #                 else:
-                #                     return EnrollResult.COURSE_CONFLICT_FOUND
-
                 # HACK: inspiration from Leo
                 res = await con.fetch('''
                 select null
@@ -277,6 +256,7 @@ class student_service(StudentService):
                     set left_capacity = left_capacity - 1
                     where id = %d
                     ''' % (section_id))
+                    # TODO: check capacity and rollback
                     return EnrollResult.SUCCESS
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
