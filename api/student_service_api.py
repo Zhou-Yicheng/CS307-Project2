@@ -256,8 +256,18 @@ class student_service(StudentService):
                     set left_capacity = left_capacity - 1
                     where id = %d
                     ''' % (section_id))
-                    # TODO: check capacity and rollback
-                    return EnrollResult.SUCCESS
+                    
+                    capacity = await con.fetch('''
+                        select left_capacity
+                        from section
+                        where id = %d
+                    ''' % (section_id))
+                    if capacity < 0:
+                        await con.rollback()
+                        return EnrollResult.COURSE_IS_FULL
+                    else:
+                        await con.commit()
+                        return EnrollResult.SUCCESS
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
