@@ -1,6 +1,7 @@
 import datetime
-from typing import List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional
 
+import asyncio
 import asyncpg
 from dto import (Course, CourseGrading, CourseSearchEntry, CourseSection,
                  CourseSectionClass, CourseTable, CourseTableEntry, CourseType,
@@ -11,9 +12,53 @@ from service.student_service import StudentService
 
 
 class student_service(StudentService):
+    # write-through cache
+    class Cache():
+        _cache: Dict[(int, int): str]   # cache for takes table
+        _pool: asyncpg.Pool             # pool to get connection
+
+        def __init__(self, pool):
+            self._cache = {}
+            self._pool = pool
+
+        async def read_grade(self, stu, sec):
+            # hit
+            if (stu, sec) in self._cache:
+                return self._cache[(stu, sec)]
+            # miss
+            async with self._pool.acquire() as con:
+                res = await con.fetchrow('''
+                select grade
+                from takes
+                where student_id = %d and section_id = %d
+                ''' % (stu, sec))
+                if res is None:
+                    raise EntityNotFoundError
+                self._cache[(stu, sec)] = res['grade']
+                return res['grade']
+
+        # TODO: exception
+        # TODO: write buffer
+        async def write_grade(self, stu, sec, grade):
+            # hit
+            if (stu, sec) in self._cache:
+                self._cache[(stu, sec)] = grade
+                # TODO: update
+                return
+            # miss
+            async with self._pool.acquire() as con:
+                asyncio.create_task(con.execute('''
+                insert into takes (student_id, section_id, grade)
+                values (%d, %d, '%s')
+                ''' % (stu, sec, grade)))
+            # TODO
+            # update cache
+            self._cache[(stu, sec)] = grade
+
 
     def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
+        self.__cache = self.Cache(pool)
 
     async def add_student(self, user_id: int, major_id: int, first_name: str,
                           last_name: str, enrolled_date: datetime.date):
@@ -45,8 +90,10 @@ class student_service(StudentService):
                             page_size: int, page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
-            major = await con.fetchval('select major from student where id =%d'
-                                       % student_id)
+            stu = await con.fetchrow('select * from student where id = %d'
+                                     % student_id)
+            if stu is None:
+                return []
             # Head
             sql = '''
             select course.id as course_id, course.name as course_name, credit,
@@ -81,21 +128,21 @@ class student_service(StudentService):
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'C'
-                ) ''' % major
+                ) ''' % stu['major']
             if search_course_type is CourseType.MAJOR_ELECTIVE:
                 sql += '''
                 and course in (
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'E'
-                ) ''' % major
+                ) ''' % stu['major']
             if search_course_type is CourseType.CROSS_MAJOR:
                 sql += '''
                 and course in (
                     select course_id
                     from major_course
                     where major_id <> %d
-                ) ''' % major
+                ) ''' % stu['major']
             if search_course_type is CourseType.PUBLIC:
                 sql += 'and course NOT in (select course_id from major_course)'
             if ignore_full:
@@ -178,7 +225,8 @@ class student_service(StudentService):
                                               c['class_end'],
                                               c['location']
                                               ) for c in r['cls']]
-                    conflict = []   # TODO: %course_name[%section_name] sort
+                    # TODO: %course_name[%section_name] sort
+                    conflict = []
                     ans.append(CourseSearchEntry(cos, sec, cls, conflict))
                 return ans
 
@@ -212,10 +260,11 @@ class student_service(StudentService):
                     if grade[-1][0] != 'FAIL' and int(grade[-1][0]) >= 60:
                         return EnrollResult.ALREADY_PASSED
 
-                pas = await self.passed_prerequisites_for_course(student_id,
-                                                                 sec['course'])
-                if not pas:
-                    return EnrollResult.PREREQUISITES_NOT_FULFILLED
+                # TODO: prerequisite
+                # pas = await self.passed_prerequisites_for_course(student_id,
+                #                                                  sec['course'])
+                # if not pas:
+                #     return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
                 # HACK: inspiration from Leo
                 res = await con.fetch('''
@@ -246,7 +295,7 @@ class student_service(StudentService):
                 if sec['left_capacity'] == 0:
                     return EnrollResult.COURSE_IS_FULL
 
-                async with con.transaction():
+                async with con.transaction() as tr:
                     await con.execute('''
                     insert into takes (student_id, section_id)
                     values (%d, %d)
@@ -256,18 +305,17 @@ class student_service(StudentService):
                     set left_capacity = left_capacity - 1
                     where id = %d
                     ''' % (section_id))
-                    
-                    capacity = await con.fetch('''
+
+                    capacity = await con.fetchval('''
                         select left_capacity
                         from section
                         where id = %d
                     ''' % (section_id))
-                    if capacity < 0:
-                        await con.rollback()
-                        return EnrollResult.COURSE_IS_FULL
-                    else:
-                        await con.commit()
+                    if capacity >= 0:
                         return EnrollResult.SUCCESS
+                    else:
+                        await tr.rollback()
+                        return EnrollResult.COURSE_IS_FULL
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
@@ -309,10 +357,13 @@ class student_service(StudentService):
                     from course
                     where id = (select course from section where section.id=%d)
                     ''' % section_id)
+                    if (grading is None):
+                        raise EntityNotFoundError
                     if (grading == 'PASS_OR_FAIL' and type(grade) == int or
                             grading == 'HUNDRED_MARK_SCORE' and
                             isinstance(grade, PassOrFailGrade)):
                         raise IntegrityViolationError
+
                     if grade is PassOrFailGrade.PASS:
                         grade = 'PASS'
                     if grade is PassOrFailGrade.FAIL:
@@ -321,7 +372,6 @@ class student_service(StudentService):
                     insert into takes (student_id, section_id, grade)
                     values (%d, %d, '%s')
                     ''' % (student_id, section_id, grade))
-
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
@@ -371,7 +421,9 @@ class student_service(StudentService):
                 raise EntityNotFoundError
 
     def dto(grade: str) -> Grade:
-        if grade == 'PASS':
+        if grade is None:
+            return None
+        elif grade == 'PASS':
             grade = PassOrFailGrade.PASS
         elif grade == 'FAIL':
             grade = PassOrFailGrade.FAIL

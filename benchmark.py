@@ -71,10 +71,10 @@ async def test_add_course():
         cd[c['id']] = c
         await insert_course(c)
         sections = css[c['id']]
-        for sem in range(1, 4):
+        for sem in list(sections.keys())[1:]:
             for s in sections[f'{sem}'][1:]:
                 for s2 in s:
-                    section_id = await rcs.add_course_section(c['id'], sid[sem], s2['name'], s2['totalCapacity'])
+                    section_id = await rcs.add_course_section(c['id'], sid[int(sem)], s2['name'], s2['totalCapacity'])
                     sec_id[s2['id']] = section_id
                     cls = cscs[f"{s2['id']}"][1]
                     for cl in cls:
@@ -180,11 +180,12 @@ async def test_course_table(path):
                                                e['classBegin'],
                                                e['classEnd'],
                                                e['location']
-                                               ) for e in a['table'][k]]
+                                               ) for e in a['table'][k]].sort(key=lambda it: it.course_full_name)
                for k in a['table']}
         s = p[1][0]
         d = datetime.fromtimestamp(p[1][1] * 86400).date()
         res = await rsts.get_course_table(s, d)
+        res = {k: res[k].sort(key=lambda it: it.course_full_name) for k in res.keys()}
         if ans == res:
             return 1
         else:
@@ -299,7 +300,7 @@ async def test_query(path: str):
             continue
         res = await json_query_reader(open(f'{path}/{x}', encoding='utf-8'))
         ans = await json_answer_reader(open(f"{path}/{x.split('.')[0]}Result.json", encoding='utf-8'))
-        for (r, a) in zip(res, ans):
+        for r, a in zip(res, ans):
             if r == a:
                 ok += 1
     return ok

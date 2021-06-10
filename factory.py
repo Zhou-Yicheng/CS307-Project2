@@ -41,7 +41,7 @@ class ServiceFactory:
             raise asyncpg.exceptions.InterfaceError
         self.__pool._initializing = True
         try:
-            self.__pool._initialize()
+            await self.__pool._initialize()
         finally:
             self.__pool._initializing = False
             self.__pool._initialized = True

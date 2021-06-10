@@ -176,13 +176,11 @@ class ServiceFactory:
 
 - We use [**pip**](https://pip.pypa.io/) to manage dependent python libraries. If you want to use a third-party library in your project, you need to record it in `requirements.txt`. Your dependencies should be downloadable from [The Python Package Index (PyPI)](https://pypi.org/).
 
-
 ## 3. What to submit?
 
 - `cs307.sql`: An file with table creation statements, constraints, index creation statements, and stored procedures if you have, but **without** data in tables.
 
 - `src.tar.gz`: An archive containing all your Python source files. We have provided a Python script named `bundle.py` for you to create a Gzip-compressed archive in a common format.
-
 
 ## 4. What to deliver?
 
@@ -190,37 +188,37 @@ class ServiceFactory:
 
 - **IMPROVE YOUR EFFICIENCY:** After you passed the base tests, you need to find ways to improve the performance of your implementation. You can work on the following aspects.
 
-  #### Resource Consumption
+### Resource Consumption
 
-    - Memory Consumption: How much memory your database takes?
-    - Disk Consumption: How much disk space your database takes? How are they distributed? (index, data, other info?)
+- Memory Consumption: How much memory your database takes?
 
-  #### Speed
+- Disk Consumption: How much disk space your database takes? How are they distributed? (index, data, other info?)
 
-    - Data Import Speed: How much time your database need to import all data?
+### Speed
 
-    - Data Modify Speed (Insertion, Update, Deletion): How much time your database need to change one/one hundred/one million rows?
+- Data Import Speed: How much time your database need to import all data?
 
-    - Data Query Speed: How much time your database need to fetch one/one hundred/one million rows?
+- Data Modify Speed (Insertion, Update, Deletion): How much time your database need to change one/one hundred/one million rows?
 
-    - Cache Policy: How much time your database need to fetch a row if the row was just accessed by others?
+- Data Query Speed: How much time your database need to fetch one/one hundred/one million rows?
 
-  #### Concurrency
+- Cache Policy: How much time your database need to fetch a row if the row was just accessed by others?
 
-    - Simultaneous Query Number: How many queries can your database handles simultaneously?
+### Concurrency
 
-    - Simultaneous Query Latency: How long does it take to query if there are many users connect to your database simultaneously.
+- Simultaneous Query Number: How many queries can your database handles simultaneously?
 
-    - Transaction Safety: Is your database safe with many users concurrently writing/reading to it?
+- Simultaneous Query Latency: How long does it take to query if there are many users connect to your database simultaneously.
 
-  #### Correctness
+- Transaction Safety: Is your database safe with many users concurrently writing/reading to it?
 
-    - Malformed Data Identification: Can your database identify the malformed data automatically?
-    - ACID Principle
+### Correctness
 
+- Malformed Data Identification: Can your database identify the malformed data automatically?
 
-- **(Optional) DIFFERENT WAYS SAME GOAL?** Can you find other ways to implement these functionalities? Are they **BETTER/WORSE/USECASE-RELATED?** Please do share us your amazing ideas.
+- ACID Principle
 
+**(Optional) DIFFERENT WAYS SAME GOAL?** Can you find other ways to implement these functionalities? Are they **BETTER/WORSE/USECASE-RELATED?** Please do share us your amazing ideas.
 
 ## 5. Project Timeline
 
@@ -232,6 +230,6 @@ Presentation (Online): **June 15th**.
 
 Bao-Zhiyuan: `department_service_api.py`, `instructor_service_api.py`, `major_service_api.py`, `semester_service_api.py`, `user_service_api.py`;
 
-Zhou-Yicheng: `factory.py`, `course_service_api.py`, `student_service_api.py`;
+Zhou-Yicheng: `benchmark.py`, `factory.py`, `course_service_api.py`, `student_service_api.py`;
 
 Together: `cs307.sql`;
