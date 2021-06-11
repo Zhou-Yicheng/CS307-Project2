@@ -130,3 +130,83 @@ where id = semester_id;
 return;
 end
 $$ language plpgsql
+
+create or replace function pass_pre(sid integer, course_id varchar)
+    returns boolean
+AS $$
+    declare
+        res "prerequisite"[];
+        pas varchar[];
+        val boolean[];
+        visited boolean[];
+        stack integer[];
+        top integer;
+        i integer;
+        ptri integer;
+        pasi varchar;
+        all_flag boolean;
+        any_flag boolean;
+begin
+    select array_agg(x) into res
+    from
+        (select *
+        from prerequisite
+        where id = course_id
+        order by idx) x;
+    if array_length(res,1) is null then
+        return true;
+    end if;
+
+    select array_agg(x) into pas
+    from
+        (select course
+        from takes
+            join section on section_id = section.id
+        where student_id = sid
+            and grade <> 'FAIL'
+            and (grade = 'PASS' or cast(grade as integer) >= 60)) x;
+
+    top := 1;
+    stack[top] := 0;
+    for x in 1..array_length(res,1) loop
+        val[x] := false;
+        visited[x] := false;
+        end loop;
+    while top >= 1 loop
+        i := stack[top];
+        if visited[i] then
+            if res[i].val = 'AND' then
+                all_flag := true;
+                foreach ptri in array res[i].ptr loop
+                    all_flag := val[ptri] and all_flag;
+                    end loop;
+                val[i] := all_flag;
+                top := top-1;
+            elseif res[i].val = 'OR' then
+                any_flag := false;
+                foreach ptri in array res[i].ptr loop
+                    any_flag := val[ptri] or any_flag;
+                    val[i] := any_flag;
+                    end loop;
+            end if;
+        else
+            visited[i] := true;
+            if res[i].ptr is not null then
+                foreach ptri in array res[i].ptr loop
+                    top := top + 1;
+                    stack[top] := ptri;
+                    end loop;
+            else
+                val[i] := false;
+                foreach pasi in array pas loop
+                    if(res[i].val = pasi) then
+                        val[i] := true;
+                    end if;
+                    end loop;
+                top := top - 1;
+            end if;
+        end if;
+        end loop;
+    return val[1];
+end;
+$$ language plpgsql;
