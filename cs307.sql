@@ -130,7 +130,7 @@ return;
 end
 $$ language plpgsql;
 
-create or replace function pas_pre(sid integer, cid varchar)
+create or replace function pass_pre(sid integer, course_id varchar)
     returns boolean
 AS $$
     declare
@@ -150,13 +150,14 @@ begin
     from
         (select *
         from prerequisite
-        where id = cid
+        where id = course_id
         order by idx) x;
-
+    
     if res is null then
         return true;
     end if;
 
+--     raise notice 'res : %', res;
     select array_agg(x) into pas
     from
         (select course
@@ -165,13 +166,15 @@ begin
         where student_id = sid
             and grade <> 'FAIL'
             and (grade = 'PASS' or cast(grade as integer) >= 60)) x;
-
+--     raise notice 'pas : %', pas;
+    
     if pas is null then
         return false;
     end if;
-
+    
     top := 1;
-    stack[top] := 0;
+    stack[top] := 1;
+
     for x in 1..array_length(res,1) loop
         val[x] := false;
         visited[x] := false;
@@ -205,14 +208,14 @@ begin
             else
                 val[i] := false;
                 foreach pasi in array pas loop
-                    if(res[i].val = pasi) then
+                    if('('||res[i].val||')' = pasi) then
                         val[i] := true;
                     end if;
                 end loop;
                 top := top - 1;
             end if;
         end if;
-        end loop;
+    end loop;
     return val[1];
 end;
 $$ language plpgsql;
