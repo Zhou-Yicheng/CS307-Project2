@@ -1,7 +1,6 @@
 import datetime
-from typing import Dict, List, Mapping, Optional
+from typing import List, Mapping, Optional
 
-import asyncio
 import asyncpg
 from dto import (Course, CourseGrading, CourseSearchEntry, CourseSection,
                  CourseSectionClass, CourseTable, CourseTableEntry, CourseType,
@@ -12,56 +11,16 @@ from service.student_service import StudentService
 
 
 class student_service(StudentService):
-    # write-through cache
-    class Cache():
-        _cache: Dict[(int, int): str]   # cache for takes table
-        _pool: asyncpg.Pool             # pool to get connection
-
-        def __init__(self, pool):
-            self._cache = {}
-            self._pool = pool
-
-        async def read_grade(self, stu, sec):
-            # hit
-            if (stu, sec) in self._cache:
-                return self._cache[(stu, sec)]
-            # miss
-            async with self._pool.acquire() as con:
-                res = await con.fetchrow('''
-                select grade
-                from takes
-                where student_id = %d and section_id = %d
-                ''' % (stu, sec))
-                if res is None:
-                    raise EntityNotFoundError
-                self._cache[(stu, sec)] = res['grade']
-                return res['grade']
-
-        # TODO: exception
-        # TODO: write buffer
-        async def write_grade(self, stu, sec, grade):
-            # hit
-            if (stu, sec) in self._cache:
-                self._cache[(stu, sec)] = grade
-                # TODO: update
-                return
-            # miss
-            async with self._pool.acquire() as con:
-                asyncio.create_task(con.execute('''
-                insert into takes (student_id, section_id, grade)
-                values (%d, %d, '%s')
-                ''' % (stu, sec, grade)))
-            # TODO
-            # update cache
-            self._cache[(stu, sec)] = grade
-
-
     def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
-        self.__cache = self.Cache(pool)
+        self.__cache = {}
 
-    async def add_student(self, user_id: int, major_id: int, first_name: str,
-                          last_name: str, enrolled_date: datetime.date):
+    async def add_student(self,
+                          user_id: int,
+                          major_id: int,
+                          first_name: str,
+                          last_name: str,
+                          enrolled_date: datetime.date):
         async with self.__pool.acquire() as con:
             try:
                 if str.isascii(first_name) and str.isascii(last_name):
@@ -75,7 +34,9 @@ class student_service(StudentService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    async def search_course(self, *, student_id: int, semester_id: int,
+    async def search_course(self, *,
+                            student_id: int,
+                            semester_id: int,
                             search_cid: Optional[str] = None,
                             search_name: Optional[str] = None,
                             search_instructor: Optional[str] = None,
@@ -87,68 +48,83 @@ class student_service(StudentService):
                             ignore_conflict: bool,
                             ignore_passed: bool,
                             ignore_missing_prerequisites: bool,
-                            page_size: int, page_index: int
+                            page_size: int,
+                            page_index: int
                             ) -> List[CourseSearchEntry]:
         async with self.__pool.acquire() as con:
             stu = await con.fetchrow('select * from student where id = %d'
                                      % student_id)
             if stu is None:
-                return []
-            # Head
-            sql = '''
+                return EntityNotFoundError
+            HEAD = '''
             select course.id as course_id, course.name as course_name, credit,
                 class_hour, grading, section.id as section_id, section.name as
                 section_name, total_capacity, left_capacity, array_agg(class.*)
-                as cls, array_agg(instructor.*) as ins
-            from course
+                as cls, array_agg(instructor.*) as ins '''
+            FROM = '''
+            from course '''
+            JOIN = '''
                 join section on course.id = section.course and semester = %d
                 join class on section.id = class.section
-                join instructor on class.instructor = instructor.id
-            where 1=1 ''' % semester_id
-            # Body
+                join instructor on class.instructor = instructor.id ''' \
+                % semester_id
+            BODY = '''
+            where 1=1 '''
             if search_cid:
-                sql += "and course.id ~ '%s' " % search_cid
+                BODY += "and course.id ~ '%s' " % search_cid
             if search_name:
-                sql += "and course.name||'['||section.name||']' like '%%%s%%'"\
+                BODY += "and course.name||'['||section.name||']'like'%%%s%%' "\
                     % search_name
             if search_instructor:
-                sql += "and full_name ~ '%s' " % search_instructor
+                BODY += "and full_name ~ '%s' " % search_instructor
             if search_day_of_week:
-                sql += "and day_of_week = '%s' " % search_day_of_week.name
+                BODY += "and class.day_of_week = '%s' " % search_day_of_week.name
             if search_class_time:
-                sql += "and %d between class_begin and class_end " \
+                BODY += "and %d between class.class_begin and class.class_end " \
                     % search_class_time
             if search_class_locations:
-                sql += "and location ~ ANY(array%s) " % search_class_locations
+                BODY += "and class.location ~ ANY(array%s) " % search_class_locations
             if search_course_type is CourseType.ALL:
                 pass
             if search_course_type is CourseType.MAJOR_COMPULSORY:
-                sql += '''
-                and course in (
+                BODY += '''
+                and course.id in (
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'C'
                 ) ''' % stu['major']
             if search_course_type is CourseType.MAJOR_ELECTIVE:
-                sql += '''
-                and course in (
+                BODY += '''
+                and course.id in (
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'E'
                 ) ''' % stu['major']
             if search_course_type is CourseType.CROSS_MAJOR:
-                sql += '''
-                and course in (
+                BODY += '''
+                and course.id in (
                     select course_id
                     from major_course
                     where major_id <> %d
                 ) ''' % stu['major']
             if search_course_type is CourseType.PUBLIC:
-                sql += 'and course NOT in (select course_id from major_course)'
+                BODY += 'and course.id NOT in \
+                    (select course_id from major_course) '
             if ignore_full:
-                sql += 'and left_capacity > 0 '
+                BODY += 'and left_capacity > 0 '
+            if ignore_passed:
+                BODY += '''
+                and section.id NOT in (
+                    select section_id
+                    from takes
+                    where student_id = %d
+                        and grade <> 'FAIL'
+                        and (grade = 'PASS' or cast(grade as integer) >= 60)
+                ) ''' % student_id
+            if ignore_missing_prerequisites:
+                BODY += 'and pas_pre(%d, course.id) ' % student_id
             if ignore_conflict:
-                sql += '''
+                BODY += '''
                 and NOT exists (
                     select null
                     from class c
@@ -159,53 +135,57 @@ class student_service(StudentService):
                       and NOT (class.class_end < c.class_begin or
                                class.class_begin > c.class_end)
                 ) ''' % (semester_id, student_id)
-                sql += '''
+                BODY += '''
                 and section.course NOT in (
                     select course
                     from takes
                         join section on section_id = section.id
                             and student_id = %d and semester = %d
                 ) ''' % (student_id, semester_id)
-            if ignore_passed:
-                sql += '''
-                and section.id NOT in (
-                    select section_id
+            else:
+                HEAD += ",array_agg(conf_name) as conf "
+                JOIN += '''
+                join (
+                    select course.name||'['||section.name||']' as conf_name,
+                        course, week_list, day_of_week, class_begin, class_end
                     from takes
+                      join section on section_id = section.id and semester = %d
+                      join course on section.course = course.id
+                      join class on section.id = class.section
                     where student_id = %d
-                        and grade <> 'FAIL'
-                        and (grade = 'PASS' or cast(grade as integer) >= 60)
-                ) ''' % student_id
-            # TODO: prerequisite
-            # if ignore_missing_prerequisites:
-            #     sql += '''
-            #     and NOT exists (
-            #         select course
-            #         from takes
-            #             join section on section_id = section.id
-            #                 and student_id = %d
-            #                 and grade <> 'FAIL'
-            #                 and (grade = 'PASS' or cast(grade as integer) >=60)
-            #     )
-            #     (
-            #         select *
-            #         from prerequisites
-            #         where id = course.id
-            #     )
-            #     ''' % student_id
-            # End
-            sql += '''
+                )take on (
+                    course.id = take.course
+                    or class.week_list && take.week_list
+                    and class.day_of_week = take.day_of_week
+                    and NOT (class.class_end < take.class_begin
+                             or class.class_begin > take.class_end)
+                ) ''' % (semester_id, student_id)
+
+            TAIL = '''
             group by course_id, course_name, credit, class_hour, grading,
                 section_id, section_name, total_capacity, left_capacity
             order by course_id, course_name, section_name
-            limit %d offset %d ''' % (page_size, page_size*page_index)
+            limit %d offset %d
+            ''' % (page_size, page_size*page_index)
 
-            res = await con.fetch(sql)
+            try:
+                stm = await con.prepare(HEAD+FROM+JOIN+BODY+TAIL)
+            except asyncpg.exceptions.SyntaxOrAccessError as e:
+                print(HEAD+FROM+JOIN+BODY+TAIL)
+                print(e)
+
+            res = await stm.fetch()
 
             if not res:
                 return []
             else:
                 ans = []
                 for r in res:
+                    if 'conf' in r and r['conf']:
+                        conf = r['conf']
+                        conf.sort()
+                    else:
+                        conf = []
                     ins = {i['id']: Instructor(i['id'], i['full_name'])
                            for i in r['ins']}
                     cos = Course(r['course_id'],
@@ -225,13 +205,12 @@ class student_service(StudentService):
                                               c['class_end'],
                                               c['location']
                                               ) for c in r['cls']]
-                    # TODO: %course_name[%section_name] sort
-                    conflict = []
-                    ans.append(CourseSearchEntry(cos, sec, cls, conflict))
+                    ans.append(CourseSearchEntry(cos, sec, cls, conf))
                 return ans
 
-    async def enroll_course(self, student_id: int, section_id: int) \
-            -> EnrollResult:
+    async def enroll_course(self,
+                            student_id: int,
+                            section_id: int) -> EnrollResult:
         async with self.__pool.acquire() as con:
             try:
                 sec = await con.fetchrow('''
@@ -260,13 +239,11 @@ class student_service(StudentService):
                     if grade[-1][0] != 'FAIL' and int(grade[-1][0]) >= 60:
                         return EnrollResult.ALREADY_PASSED
 
-                # TODO: prerequisite
-                # pas = await self.passed_prerequisites_for_course(student_id,
-                #                                                  sec['course'])
-                # if not pas:
-                #     return EnrollResult.PREREQUISITES_NOT_FULFILLED
+                pas = await con.fetchval("select pas_pre(%d, '%s')"
+                                         % (student_id, sec['course']))
+                if not pas:
+                    return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
-                # HACK: inspiration from Leo
                 res = await con.fetch('''
                 select null
                 from class self, class other
@@ -319,16 +296,21 @@ class student_service(StudentService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    async def drop_course(self, student_id: int, section_id: int):
+    async def drop_course(self,
+                          student_id: int,
+                          section_id: int):
         async with self.__pool.acquire() as con:
-            take = await con.fetchrow('''
-            select *
-            from takes
-            where student_id = %d and section_id = %d
-            ''' % (student_id, section_id))
-            if take is None:
-                raise EntityNotFoundError
-            if take['grade']:
+            if (student_id, section_id) in self.__cache:
+                grade = self.__cache[(student_id, section_id)]
+            else:
+                res = await con.fetchrow('''
+                select grade from takes
+                where student_id = %d and section_id = %d
+                ''' % (student_id, section_id))
+                if res is None:
+                    raise EntityNotFoundError
+                grade = res['grade']
+            if grade is not None:
                 raise RuntimeError
             async with con.transaction():
                 await con.execute('''
@@ -341,7 +323,8 @@ class student_service(StudentService):
                 where id = %d
                 ''' % section_id)
 
-    async def add_enrolled_course_with_grade(self, student_id: int,
+    async def add_enrolled_course_with_grade(self,
+                                             student_id: int,
                                              section_id: int,
                                              grade: Optional[Grade]):
         async with self.__pool.acquire() as con:
@@ -364,24 +347,27 @@ class student_service(StudentService):
                             isinstance(grade, PassOrFailGrade)):
                         raise IntegrityViolationError
 
-                    if grade is PassOrFailGrade.PASS:
-                        grade = 'PASS'
-                    if grade is PassOrFailGrade.FAIL:
-                        grade = 'FAIL'
+                    if type(grade) == int:
+                        grade = str(grade)
+                    else:
+                        grade = grade.name
                     await con.execute('''
                     insert into takes (student_id, section_id, grade)
                     values (%d, %d, '%s')
                     ''' % (student_id, section_id, grade))
+                    self.__cache[(student_id, section_id)] = grade
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    async def set_enrolled_course_grade(self, student_id: int,
-                                        section_id: int, grade: Grade):
+    async def set_enrolled_course_grade(self,
+                                        student_id: int,
+                                        section_id: int,
+                                        grade: Grade):
         async with self.__pool.acquire() as con:
-            if grade is PassOrFailGrade.PASS:
-                grade = 'PASS'
-            if grade is PassOrFailGrade.FAIL:
-                grade = 'FAIL'
+            if type(grade) == int:
+                grade = str(grade)
+            else:
+                grade = grade.name
             res = await con.execute('''
             update takes
             set grade = '%s'
@@ -389,8 +375,11 @@ class student_service(StudentService):
             ''' % (grade, student_id, section_id))
             if res == 'UPDATE 0':
                 raise EntityNotFoundError
+            else:
+                self.__cache[(student_id, section_id)] = grade
 
-    async def get_enrolled_courses_and_grades(self, student_id: int,
+    async def get_enrolled_courses_and_grades(self,
+                                              student_id: int,
                                               semester_id: Optional[int]) \
             -> Mapping[Course, Grade]:
         async with self.__pool.acquire() as con:
@@ -416,7 +405,7 @@ class student_service(StudentService):
                                r['credit'],
                                r['class_hour'],
                                CourseGrading[r['grading']]
-                               ): self.dto(r['grade']) for r in res}
+                               ): student_service.dto(r['grade']) for r in res}
             else:
                 raise EntityNotFoundError
 
@@ -431,8 +420,9 @@ class student_service(StudentService):
             grade = int(grade)
         return grade
 
-    async def get_course_table(self, student_id: int, date: datetime.date) \
-            -> CourseTable:
+    async def get_course_table(self,
+                               student_id: int,
+                               date: datetime.date) -> CourseTable:
         async with self.__pool.acquire() as con:
             semester, week = await con.fetchval('''
             select day_in_semester_week('%s')
@@ -467,50 +457,54 @@ class student_service(StudentService):
                 table[day].append(entry)
             return table
 
-    async def passed_prerequisites_for_course(self, student_id: int,
+    async def passed_prerequisites_for_course(self,
+                                              student_id: int,
                                               course_id: str) -> bool:
-        async with self.__pool.acquire() as con:
-            res = await con.fetch('''
-            select *
-            from prerequisite
-            where id = '%s'
-            order by idx
-            ''' % course_id)
-            if not res:
-                return True
-            pas = await con.fetch('''
-            select course
-            from takes
-                join section on section_id = section.id
-            where student_id = %d
-              and grade <> 'FAIL'
-              and (grade = 'PASS' or cast(grade as integer) >= 60)
-            ''' % student_id)
-            pas = [str(t['course']) for t in pas]
+        return await self.__pool.acquire().fetchval("select pas_pre(%d, '%s'"
+                                                    % student_id, course_id)
+        # async with self.__pool.acquire() as con:
+        #     res = await con.fetch('''
+        #     select *
+        #     from prerequisite
+        #     where id = '%s'
+        #     order by idx
+        #     ''' % course_id)
+        #     if not res:
+        #         return True
+        #     pas = await con.fetch('''
+        #     select course
+        #     from takes
+        #         join section on section_id = section.id
+        #     where student_id = %d
+        #       and grade <> 'FAIL'
+        #       and (grade = 'PASS' or cast(grade as integer) >= 60)
+        #     ''' % student_id)
+        #     pas = [str(t['course']) for t in pas]
 
-            stack = [0]
-            val = [False for i in range(len(res))]
-            visited = [False for i in range(len(res))]
-            while stack:
-                i = stack[-1]
-                if visited[i]:
-                    if res[i]['val'] == 'AND':
-                        val[i] = all([val[c] for c in res[i]['ptr']])
-                        stack.pop()
-                    elif res[i]['val'] == 'OR':
-                        val[i] = any([val[c] for c in res[i]['ptr']])
-                        stack.pop()
-                else:
-                    visited[i] = True
-                    if res[i]['ptr']:
-                        for j in res[i]['ptr']:
-                            stack.append(j)
-                    else:
-                        val[i] = (res[i]['val'] in pas)
-                        stack.pop()
-            return val[0]
+        #     stack = [0]
+        #     val = [False for i in range(len(res))]
+        #     visited = [False for i in range(len(res))]
+        #     while stack:
+        #         i = stack[-1]
+        #         if visited[i]:
+        #             if res[i]['val'] == 'AND':
+        #                 val[i] = all([val[c] for c in res[i]['ptr']])
+        #                 stack.pop()
+        #             elif res[i]['val'] == 'OR':
+        #                 val[i] = any([val[c] for c in res[i]['ptr']])
+        #                 stack.pop()
+        #         else:
+        #             visited[i] = True
+        #             if res[i]['ptr']:
+        #                 for j in res[i]['ptr']:
+        #                     stack.append(j)
+        #             else:
+        #                 val[i] = (res[i]['val'] in pas)
+        #                 stack.pop()
+        #     return val[0]
 
-    async def get_student_major(self, student_id: int) -> Major:
+    async def get_student_major(self,
+                                student_id: int) -> Major:
         async with self.__pool.acquire() as con:
             res = await con.fetchrow('''
             select major.id, major.name as major_name, department,

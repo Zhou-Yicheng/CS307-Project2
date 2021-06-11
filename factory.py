@@ -27,8 +27,8 @@ def create_async_context():
 class ServiceFactory:
     def __init__(self, pool: asyncpg.Pool):
         self.__pool = pool
-        self.__pool._minsize = 15
-        self.__pool._maxsize = 30
+        self.__pool._minsize = 10
+        self.__pool._maxsize = 20
 
     async def async_init(self):
         # You can add asynchronous initialization steps here.

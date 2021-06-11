@@ -31,3 +31,4 @@ src.tar.gz
 # test file
 test.py
 *.txt
+jwxt.session.sql
