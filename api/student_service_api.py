@@ -34,6 +34,7 @@ class student_service(StudentService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
+    # * BUG about class
     async def search_course(self, *,
                             student_id: int,
                             semester_id: int,
@@ -122,25 +123,23 @@ class student_service(StudentService):
                         and (grade = 'PASS' or cast(grade as integer) >= 60)
                 ) ''' % student_id
             if ignore_missing_prerequisites:
-                BODY += 'and pas_pre(%d, course.id) ' % student_id
+                BODY += 'and pass_pre(%d, course.id) ' % student_id
             if ignore_conflict:
                 BODY += '''
                 and NOT exists (
                     select null
-                    from class c
-                      join section on c.section = section.id and semester = %d
-                      join takes on c.section = section_id and student_id = %d
-                    where class.week_list && c.week_list
-                      and class.day_of_week = c.day_of_week
-                      and NOT (class.class_end < c.class_begin or
-                               class.class_begin > c.class_end)
-                ) ''' % (semester_id, student_id)
-                BODY += '''
-                and section.course NOT in (
-                    select course
                     from takes
                         join section on section_id = section.id
-                            and student_id = %d and semester = %d
+                        join class c on section.id = class.section
+                    where student_id = %d
+                      and semester = %d
+                      and (
+                          course.id = course
+                          or class.week_list && c.week_list
+                          and class.day_of_week = c.day_of_week
+                          and class.class_begin <= c.class_end
+                          and class.class_end >= c.class_begin
+                      )
                 ) ''' % (student_id, semester_id)
             else:
                 HEAD += ",array_agg(conf_name) as conf "
@@ -157,8 +156,8 @@ class student_service(StudentService):
                     course.id = take.course
                     or class.week_list && take.week_list
                     and class.day_of_week = take.day_of_week
-                    and NOT (class.class_end < take.class_begin
-                             or class.class_begin > take.class_end)
+                    and class.class_begin <= take.class_end
+                    and class.class_end >= take.class_begin
                 ) ''' % (semester_id, student_id)
 
             TAIL = '''
@@ -239,34 +238,31 @@ class student_service(StudentService):
                     if grade[-1][0] != 'FAIL' and int(grade[-1][0]) >= 60:
                         return EnrollResult.ALREADY_PASSED
 
-                pas = await con.fetchval("select pas_pre(%d, '%s')"
+                pas = await con.fetchval("select pass_pre(%d, '%s')"
                                          % (student_id, sec['course']))
                 if not pas:
                     return EnrollResult.PREREQUISITES_NOT_FULFILLED
 
-                res = await con.fetch('''
-                select null
-                from class self, class other
-                where self.section = %d
-                  and other.section in(
-                        select section_id
-                        from takes join section on section_id = section.id
-                            and student_id = %d and semester = %d)
-                  and self.week_list && other.week_list
-                  and self.day_of_week = other.day_of_week
-                  and NOT (self.class_end < other.class_end or
-                           self.class_begin > other.class_end)
-                ''' % (section_id, student_id, sec['semester']))
-                if res:
-                    return EnrollResult.COURSE_CONFLICT_FOUND
-
-                take = await con.fetch('''
+                conf = await con.fetch('''
                 select null
                 from takes
                     join section on section_id = section.id
-                        and student_id = %d and semester = %d and course = '%s'
-                ''' % (student_id, sec['semester'], sec['course']))
-                if take:
+                    join class on section.id = class.section
+                where student_id = %d and semester = %d
+                  and(
+                       course = '%s'
+                       or exists (
+                        select null
+                        from class this
+                            join section on class.section = %d
+                        where this.week_list && class.week_list
+                          and this.day_of_week = class.day_of_week
+                          and this.class_begin <= class.class_end
+                          and this.class_end >= class.class_begin
+                       )
+                  )
+                ''' % (student_id, sec['semester'], sec['course'], section_id))
+                if conf:
                     return EnrollResult.COURSE_CONFLICT_FOUND
 
                 if sec['left_capacity'] == 0:
@@ -460,7 +456,7 @@ class student_service(StudentService):
     async def passed_prerequisites_for_course(self,
                                               student_id: int,
                                               course_id: str) -> bool:
-        return await self.__pool.acquire().fetchval("select pas_pre(%d, '%s'"
+        return await self.__pool.acquire().fetchval("select pass_pre(%d, '%s'"
                                                     % student_id, course_id)
         # async with self.__pool.acquire() as con:
         #     res = await con.fetch('''
