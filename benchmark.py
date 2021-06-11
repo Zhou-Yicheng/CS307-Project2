@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
+from collections import defaultdict
 import json
 import os
 from datetime import datetime
@@ -21,6 +22,7 @@ did = {}
 mid = {}
 
 inserted = set()
+course_inserting = defaultdict(asyncio.Lock)
 cd = {}
 cs = json.load(open('data/courses.json', encoding='utf-8'))
 ps = json.load(open('data/coursePrerequisites.json', encoding='utf-8'))
@@ -61,9 +63,12 @@ async def pc(pre_json: Optional[dict]):
 async def insert_course(c):
     if c['id'] in inserted:
         return
-    p = ps[c['id']]
-    inserted.add(c['id'])
-    await rcs.add_course(c['id'], c['name'], c['credit'], c['classHour'], CourseGrading[c['grading']], await pc(p))
+    async with course_inserting[c['id']]:
+        if c['id'] in inserted:
+            return
+        p = ps[c['id']]
+        await rcs.add_course(c['id'], c['name'], c['credit'], c['classHour'], CourseGrading[c['grading']], await pc(p))
+        inserted.add(c['id'])
 
 
 async def test_add_course():
@@ -220,7 +225,7 @@ async def test_enroll_course(path):
             continue
         params = json.load(open(f'{path}/{x}'))
         ans = json.load(open(f'{path}/{x.split(".")[0]}Result.json'))
-        ok += sum(await asyncio.gather(*[test_one(p, a) for p, a in zip(params, ans)]))
+        ok += sum([await test_one(p, a) for p, a in zip(params, ans)])
     return ok
 
 
@@ -308,86 +313,90 @@ async def test_query(path: str):
 
 async def main():
     async with create_async_context() as context:
-        factory = ServiceFactory(context)
-        if hasattr(factory, 'async_init') and callable(getattr(factory, 'async_init')):
-            await factory.async_init()
-        global rcs, rds, ris, rms, rss, rsts, rus
-        rcs = factory.create_course_service()
-        rds = factory.create_department_service()
-        ris = factory.create_instructor_service()
-        rms = factory.create_major_service()
-        rss = factory.create_semester_service()
-        rsts = factory.create_student_service()
-        rus = factory.create_user_service()
+        try:
+            factory = ServiceFactory(context)
+            if hasattr(factory, 'async_init') and callable(getattr(factory, 'async_init')):
+                await factory.async_init()
+            global rcs, rds, ris, rms, rss, rsts, rus
+            rcs = factory.create_course_service()
+            rds = factory.create_department_service()
+            ris = factory.create_instructor_service()
+            rms = factory.create_major_service()
+            rss = factory.create_semester_service()
+            rsts = factory.create_student_service()
+            rus = factory.create_user_service()
 
-        start = time()
-        print('Import departments')
-        await test_add_department()
-        print('Import majors')
-        await test_add_major()
-        print('Import users')
-        await test_add_user()
-        print('Import semesters')
-        await test_add_semester()
-        print('Import courses')
-        await test_add_course()
-        print('Import major courses')
-        await test_add_major_course()
-        print(f'Import time usage: {round(time() - start, 2)}s')
+            start = time()
+            print('Import departments')
+            await test_add_department()
+            print('Import majors')
+            await test_add_major()
+            print('Import users')
+            await test_add_user()
+            print('Import semesters')
+            await test_add_semester()
+            print('Import courses')
+            await test_add_course()
+            print('Import major courses')
+            await test_add_major_course()
+            print(f'Import time usage: {round(time() - start, 2)}s')
 
-        print('Testing search course 1')
-        start = time()
-        ok = await test_query('data/searchCourse1')
-        print(f'Test search course 1: {ok}')
-        print(f'Test search course 1 time: {round(time() - start, 2)}s')
+            print('Testing search course 1')
+            start = time()
+            ok = await test_query('data/searchCourse1')
+            print(f'Test search course 1: {ok}')
+            print(f'Test search course 1 time: {round(time() - start, 2)}s')
 
-        print('Testing enroll course 1')
-        start = time()
-        ok = await test_enroll_course('data/enrollCourse1')
-        print(f'Test enroll course 1: {ok}')
-        print(f'Test enroll course 1 time: {round(time() - start, 2)}s')
+            print('Testing enroll course 1')
+            start = time()
+            ok = await test_enroll_course('data/enrollCourse1')
+            print(f'Test enroll course 1: {ok}')
+            print(f'Test enroll course 1 time: {round(time() - start, 2)}s')
 
-        print('Testing drop enrolled course 1')
-        start = time()
-        ok = await test_drop_course('data/enrollCourse1')
-        print(f'Test drop enrolled course 1: {ok}')
-        print(f'Test drop enrolled course 1 time: {round(time()-start, 2)}s')
+            print('Testing drop enrolled course 1')
+            start = time()
+            ok = await test_drop_course('data/enrollCourse1')
+            print(f'Test drop enrolled course 1: {ok}')
+            print(f'Test drop enrolled course 1 time: {round(time()-start, 2)}s')
 
-        print('Importing student courses')
-        start = time()
-        ok = await test_import_course()
-        print(f'Import student course: {ok}')
-        print(f'Import student course time: {round(time() - start, 2)}s')
+            print('Importing student courses')
+            start = time()
+            ok = await test_import_course()
+            print(f'Import student course: {ok}')
+            print(f'Import student course time: {round(time() - start, 2)}s')
 
-        print('Testing drop course exception')
-        start = time()
-        exc = await test_drop_except()
-        print(f'Test drop course exception: {exc}')
-        print(f'Test drop course exception time: {round(time()-start, 2)}s')
+            print('Testing drop course exception')
+            start = time()
+            exc = await test_drop_except()
+            print(f'Test drop course exception: {exc}')
+            print(f'Test drop course exception time: {round(time()-start, 2)}s')
 
-        print('Testing course table 2')
-        start = time()
-        ok = await test_course_table('data/courseTable2')
-        print(f'Test course table 2: {ok}')
-        print(f'Test course table 2 time: {round(time() - start, 2)}s')
+            print('Testing course table 2')
+            start = time()
+            ok = await test_course_table('data/courseTable2')
+            print(f'Test course table 2: {ok}')
+            print(f'Test course table 2 time: {round(time() - start, 2)}s')
 
-        print('Testing search course 2')
-        start = time()
-        ok = await test_query('data/searchCourse2')
-        print(f'Test search course 2: {ok}')
-        print(f'Test search course 2 time: {round(time() - start, 2)}s')
+            print('Testing search course 2')
+            start = time()
+            ok = await test_query('data/searchCourse2')
+            print(f'Test search course 2: {ok}')
+            print(f'Test search course 2 time: {round(time() - start, 2)}s')
 
-        print('Testing enroll course 2')
-        start = time()
-        ok = await test_enroll_course('data/enrollCourse2')
-        print(f'Test enroll course 2: {ok}')
-        print(f'Test enroll course 2 time: {round(time() - start, 2)}s')
+            print('Testing enroll course 2')
+            start = time()
+            ok = await test_enroll_course('data/enrollCourse2')
+            print(f'Test enroll course 2: {ok}')
+            print(f'Test enroll course 2 time: {round(time() - start, 2)}s')
 
-        print('Testing drop enrolled course 2')
-        start = time()
-        ok = await test_drop_course('data/enrollCourse2')
-        print(f'Test drop enrolled course 2: {ok}')
-        print(f'Test drop enrolled course 2 time: {round(time()-start, 2)}s')
+            print('Testing drop enrolled course 2')
+            start = time()
+            ok = await test_drop_course('data/enrollCourse2')
+            print(f'Test drop enrolled course 2: {ok}')
+            print(f'Test drop enrolled course 2 time: {round(time()-start, 2)}s')
+        except Exception as e:
+            print(e)
+            asyncio.get_event_loop().stop()
 
 
 if __name__ == '__main__':
