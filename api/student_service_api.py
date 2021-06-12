@@ -34,7 +34,6 @@ class student_service(StudentService):
             except asyncpg.exceptions.IntegrityConstraintViolationError as e:
                 raise IntegrityViolationError from e
 
-    # * BUG about class
     async def search_course(self, *,
                             student_id: int,
                             semester_id: int,
@@ -56,66 +55,73 @@ class student_service(StudentService):
             stu = await con.fetchrow('select * from student where id = %d'
                                      % student_id)
             if stu is None:
-                return EntityNotFoundError
-            HEAD = '''
-            select course.id as course_id, course.name as course_name, credit,
-                class_hour, grading, section.id as section_id, section.name as
-                section_name, total_capacity, left_capacity, array_agg(class.*)
-                as cls, array_agg(instructor.*) as ins '''
-            FROM = '''
-            from course '''
-            JOIN = '''
-                join section on course.id = section.course and semester = %d
-                join class on section.id = class.section
-                join instructor on class.instructor = instructor.id ''' \
-                % semester_id
+                raise EntityNotFoundError(student_id)
+            HEAD = 'select * from schedule'
             BODY = '''
-            where 1=1 '''
+            where semester = %d ''' % semester_id
             if search_cid:
-                BODY += "and course.id ~ '%s' " % search_cid
+                BODY += "and cid like '%%%s%%' " % search_cid
             if search_name:
-                BODY += "and course.name||'['||section.name||']'like'%%%s%%' "\
-                    % search_name
+                BODY += "and _name like '%%%s%%' " % search_name
             if search_instructor:
-                BODY += "and full_name ~ '%s' " % search_instructor
+                BODY += '''
+                and exists(
+                    select null
+                    from (select ins, generate_subscripts(ins, 1) as i) i
+                    where ins[i].full_name like '%%%s%%'
+                ) ''' % search_instructor
             if search_day_of_week:
-                BODY += "and class.day_of_week = '%s' " % search_day_of_week.name
+                BODY += '''
+                and exists(
+                    select null
+                    from (select cls, generate_subscripts(cls, 1) as i) i
+                    where cls[i].day_of_week = '%s'
+                ) ''' % search_day_of_week.name
             if search_class_time:
-                BODY += "and %d between class.class_begin and class.class_end " \
-                    % search_class_time
+                BODY += '''
+                and exists(
+                    select null
+                    from (select cls, generate_subscripts(cls, 1) as i) i
+                    where %d between cls[i].class_begin and cls[i].class_end
+                ) ''' % search_class_time
             if search_class_locations:
-                BODY += "and class.location ~ ANY(array%s) " % search_class_locations
+                BODY += '''
+                and exists(
+                    select null
+                    from (select cls, generate_subscripts(cls, 1) as i) i
+                    where cls[i].location ~ ANY(array%s)
+                ) ''' % search_class_locations
             if search_course_type is CourseType.ALL:
                 pass
             if search_course_type is CourseType.MAJOR_COMPULSORY:
                 BODY += '''
-                and course.id in (
+                and cid in (
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'C'
                 ) ''' % stu['major']
             if search_course_type is CourseType.MAJOR_ELECTIVE:
                 BODY += '''
-                and course.id in (
+                and cid in (
                     select course_id
                     from major_course
                     where major_id = %d and course_type = 'E'
                 ) ''' % stu['major']
             if search_course_type is CourseType.CROSS_MAJOR:
                 BODY += '''
-                and course.id in (
+                and cid in (
                     select course_id
                     from major_course
                     where major_id <> %d
                 ) ''' % stu['major']
             if search_course_type is CourseType.PUBLIC:
-                BODY += 'and course.id NOT in \
+                BODY += 'and cid NOT in \
                     (select course_id from major_course) '
             if ignore_full:
                 BODY += 'and left_capacity > 0 '
             if ignore_passed:
                 BODY += '''
-                and section.id NOT in (
+                and sid NOT in (
                     select section_id
                     from takes
                     where student_id = %d
@@ -123,54 +129,36 @@ class student_service(StudentService):
                         and (grade = 'PASS' or cast(grade as integer) >= 60)
                 ) ''' % student_id
             if ignore_missing_prerequisites:
-                BODY += 'and pass_pre(%d, course.id) ' % student_id
+                BODY += 'and pass_pre(%d, cid) ' % student_id
             if ignore_conflict:
                 BODY += '''
                 and NOT exists (
                     select null
                     from takes
                         join section on section_id = section.id
-                        join class c on section.id = class.section
+                        join class c on section.id = c.section
                     where student_id = %d
                       and semester = %d
-                      and (
-                          course.id = course
-                          or class.week_list && c.week_list
-                          and class.day_of_week = c.day_of_week
-                          and class.class_begin <= c.class_end
-                          and class.class_end >= c.class_begin
-                      )
+                      and (course = cid
+                       or exists(
+                          select null
+                          from (select cls, generate_subscripts(cls, 1) as i) i
+                          where cls[i].week_list && c.week_list
+                            and cls[i].day_of_week = c.day_of_week
+                            and cls[i].class_begin <= c.class_end
+                            and cls[i].class_end >= c.class_begin
+                      ))
                 ) ''' % (student_id, semester_id)
-            else:
-                HEAD += ",array_agg(conf_name) as conf "
-                JOIN += '''
-                join (
-                    select course.name||'['||section.name||']' as conf_name,
-                        course, week_list, day_of_week, class_begin, class_end
-                    from takes
-                      join section on section_id = section.id and semester = %d
-                      join course on section.course = course.id
-                      join class on section.id = class.section
-                    where student_id = %d
-                )take on (
-                    course.id = take.course
-                    or class.week_list && take.week_list
-                    and class.day_of_week = take.day_of_week
-                    and class.class_begin <= take.class_end
-                    and class.class_end >= take.class_begin
-                ) ''' % (semester_id, student_id)
 
             TAIL = '''
-            group by course_id, course_name, credit, class_hour, grading,
-                section_id, section_name, total_capacity, left_capacity
-            order by course_id, course_name, section_name
+            order by cid, _name
             limit %d offset %d
             ''' % (page_size, page_size*page_index)
 
             try:
-                stm = await con.prepare(HEAD+FROM+JOIN+BODY+TAIL)
+                stm = await con.prepare(HEAD+BODY+TAIL)
             except asyncpg.exceptions.SyntaxOrAccessError as e:
-                print(HEAD+FROM+JOIN+BODY+TAIL)
+                print(HEAD+BODY+TAIL)
                 print(e)
 
             res = await stm.fetch()
@@ -180,20 +168,14 @@ class student_service(StudentService):
             else:
                 ans = []
                 for r in res:
-                    if 'conf' in r and r['conf']:
-                        conf = r['conf']
-                        conf.sort()
-                    else:
-                        conf = []
-                    ins = {i['id']: Instructor(i['id'], i['full_name'])
-                           for i in r['ins']}
-                    cos = Course(r['course_id'],
-                                 r['course_name'],
+                    ins = {i['id']: Instructor(i['id'], i['full_name']) for i in r['ins']}
+                    cos = Course(r['cid'],
+                                 r['cname'],
                                  r['credit'],
-                                 r['class_hour'],
+                                 r['hour'],
                                  CourseGrading[r['grading']])
-                    sec = CourseSection(r['section_id'],
-                                        r['section_name'],
+                    sec = CourseSection(r['sid'],
+                                        r['sname'],
                                         r['total_capacity'],
                                         r['left_capacity'])
                     cls = [CourseSectionClass(c['id'],
@@ -204,6 +186,32 @@ class student_service(StudentService):
                                               c['class_end'],
                                               c['location']
                                               ) for c in r['cls']]
+                    if ignore_conflict:
+                        conf = []
+                    else:
+                        conf = await con.fetch('''
+                        select distinct course.name||'['||section.name||']' as _name
+                        from takes
+                            join section on section_id = section.id
+                            join class on section.id = class.section
+                            join course on section.course = course.id
+                        where student_id = %d and semester = %d
+                          and (
+                              course = '%s'
+                              or exists (
+                                  select null
+                                  from class this
+                                  where section = %d
+                                    and week_list && this.week_list
+                                    and day_of_week = this.day_of_week
+                                    and class_begin <= this.class_end
+                                    and class_end >= this.class_begin
+                              )
+                          )
+                        order by _name
+                        ''' % (student_id, semester_id, r['cid'], r['sid']))
+                        conf = [c['_name'] for c in conf]
+
                     ans.append(CourseSearchEntry(cos, sec, cls, conf))
                 return ans
 
@@ -249,16 +257,16 @@ class student_service(StudentService):
                     join section on section_id = section.id
                     join class on section.id = class.section
                 where student_id = %d and semester = %d
-                  and(
+                  and (
                        course = '%s'
                        or exists (
-                        select null
-                        from class this
-                            join section on class.section = %d
-                        where this.week_list && class.week_list
-                          and this.day_of_week = class.day_of_week
-                          and this.class_begin <= class.class_end
-                          and this.class_end >= class.class_begin
+                          select null
+                          from class this
+                              join section on this.section = %d
+                          where this.week_list && class.week_list
+                            and this.day_of_week = class.day_of_week
+                            and this.class_begin <= class.class_end
+                            and this.class_end >= class.class_begin
                        )
                   )
                 ''' % (student_id, sec['semester'], sec['course'], section_id))

@@ -1,7 +1,7 @@
 drop schema public CASCADE;
 create schema public;
 create table semester (
-	id			serial primary key,
+	id			    serial primary key,
 	name			varchar not null,
 	begin_date		date not null,
 	end_date		date not null,
@@ -10,32 +10,32 @@ create table semester (
 );
 
 create table department (
-	id			serial primary key,
+	id			    serial primary key,
 	name			varchar not null,
 	UNIQUE(name)
 );
 
 create table major (
-	id			serial primary key,
+	id			    serial primary key,
 	name			varchar not null,
 	department		integer not null references department ON DELETE CASCADE,
 	UNIQUE(name, department)
 );
 
 create table instructor (
-	id			integer primary key,
+	id			    integer primary key,
 	full_name		varchar not null
 );
 
 create table student (
-	id			integer primary key,
+	id			    integer primary key,
 	full_name		varchar not null,
-	enrolled_date		date not null,
+	enrolled_date	date not null,
 	major			integer not null references major ON DELETE CASCADE
 );
 
 create table course (
-	id			varchar primary key,
+	id			    varchar primary key,
 	name			varchar not null,
 	credit			integer not null,
 	class_hour		integer not null,
@@ -45,10 +45,10 @@ create table course (
 
 -- section means class, name could be "No.1 Chinese class", "No.1 English class"
 create table section (
-	id			serial primary key,
+	id			    serial primary key,
+	name			varchar not null,
 	course			varchar not null references course ON DELETE CASCADE,
 	semester		integer not null references semester ON DELETE CASCADE,
-	name			varchar not null,
 	total_capacity		integer not null,
 	left_capacity		integer not null,
 	UNIQUE (course, semester, name)
@@ -56,7 +56,7 @@ create table section (
 
 -- class means lecture
 create table class (
-	id			serial primary key,
+	id			    serial primary key,
 	section			integer not null references section ON DELETE CASCADE,
 	instructor		integer not null references instructor ON DELETE CASCADE,
 	day_of_week		varchar not null,
@@ -97,6 +97,27 @@ create index on class (section);
 create index on section (course);
 create index on prerequisite (id);
 create index on takes (student_id);
+
+create view schedule as(
+    select course.name||'['||section.name||']' as _name,
+        course.id as cid,
+        course.name as cname,
+        course.credit as credit,
+        course.class_hour as hour,
+        course.grading as grading,
+        section.id as sid,
+        section.name as sname,
+        section.semester as semester,
+        section.total_capacity as total_capacity,
+        section.left_capacity as left_capacity,
+        array_agg(class.*) as cls,
+        array_agg(instructor.*) as ins
+    from course
+        join section on course.id = section.course
+        join class on section.id = class.section
+        join instructor on class.instructor = instructor.id
+    group by _name, cid, cname, hour, grading, sid, sname, total_capacity, left_capacity
+);
 
 -- create view coursetable as(
 -- 	select day_of_week,

@@ -173,7 +173,11 @@ async def test_import_course():
                 pass
         return ok
 
-    return sum(await asyncio.gather(*[import_one_student(k, sc[k]) for k in sc]))
+    tasks = []
+    for k in sc:
+        tasks.append(asyncio.create_task(import_one_student(k, sc[k])))
+    return sum(await asyncio.gather(*tasks))
+    # return sum(await asyncio.gather(*[import_one_student(k, sc[k]) for k in sc]))
 
 
 async def test_course_table(path):
@@ -219,6 +223,7 @@ async def test_enroll_course(path):
             print(stu)
             print(sec)
             print(f'ENROLL RESULT ERROR: {res}, EXPECTED: {ans}')
+            # raise Exception("DEBUG")
             return 0
 
     ok = 0
@@ -307,12 +312,19 @@ async def test_query(path: str):
             continue
         res = await json_query_reader(open(f'{path}/{x}', encoding='utf-8'))
         ans = await json_answer_reader(open(f"{path}/{x.split('.')[0]}Result.json", encoding='utf-8'))
+        # que = json.load(open(path + '/' + x, encoding='utf-8'))
+        # for i in range(len(que)):
+        #     if res[i] == ans[i]:
+        #         ok += 1
+        #     else:
+        #         print(ans[i])
+        #         print(que[i])
         for r, a in zip(res, ans):
             if r == a:
                 ok += 1
             else:
                 for i, j in zip(r, a):
-                    if i==j:
+                    if i.conflict_course_names==j.conflict_course_names:
                         pass
                     else:
                         print(i)
